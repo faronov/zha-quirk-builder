@@ -38,6 +38,35 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      - name: Install Linux desktop libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            libegl1 \
+            libgl1 \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
+            libxcb-xinerama0
+
+      - name: Build OpenSSL for Windows ARM64
+        if: matrix.artifact == 'windows-arm64'
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP "vcpkg"
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git $root
+          & "$root\bootstrap-vcpkg.bat" -disableMetrics
+          & "$root\vcpkg.exe" install openssl:arm64-windows-static-md
+          "VCPKG_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VCPKGRS_TRIPLET=arm64-windows-static-md" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VCPKG_DEFAULT_TRIPLET=arm64-windows-static-md" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "OPENSSL_STATIC=1" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Install project
         run: python -m pip install --disable-pip-version-check -e ".[dev,build]"
 
