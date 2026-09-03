@@ -16,6 +16,10 @@ def test_efekta_sample_generates_valid_quirk_v2_python() -> None:
     assert ".switch(" in source
     assert "multiplier=0.1" in source
     assert "from zhaquirks.builder import QuirkBuilder" in source
+    assert ".prevent_default_entity_creation(endpoint_id=1, cluster_id=0x0402)" in source
+    assert "reportable_change=25" in source
+    assert "reportable_change=50" in source
+    assert "max_interval=21600" in source
     assert source.rstrip().endswith(".add_to_registry()\n)")
 
 
