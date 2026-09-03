@@ -1,15 +1,17 @@
 import os
 import sys
 
+import uv
 from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 
 project_root = os.path.abspath(os.path.join(SPECPATH, ".."))
 
 datas = []
-for distribution in ("zigpy", "zha", "zha-quirks"):
+for distribution in ("uv", "zigpy", "zha", "zha-quirks"):
     datas += copy_metadata(distribution)
 
+uv_binary = uv.find_uv_bin()
 hiddenimports = [
     "zigpy.types",
     "zigpy.quirks",
@@ -21,7 +23,7 @@ hiddenimports += collect_submodules("zhaquirks.builder")
 analysis = Analysis(
     [os.path.join(project_root, "src", "zha_quirk_builder", "__main__.py")],
     pathex=[os.path.join(project_root, "src")],
-    binaries=[],
+    binaries=[(uv_binary, ".")],
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],

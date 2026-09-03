@@ -122,10 +122,13 @@ def validate_import(project: QuirkProject, timeout: int = 15) -> list[Validation
         )
         return issues
 
-    status, detail = receiver.recv() if receiver.poll() else (
-        "error",
-        f"validator process exited with code {process.exitcode}",
-    )
+    if receiver.poll():
+        try:
+            status, detail = receiver.recv()
+        except EOFError:
+            status, detail = "error", f"validator process exited with code {process.exitcode}"
+    else:
+        status, detail = "error", f"validator process exited with code {process.exitcode}"
     receiver.close()
     if status == "error":
         issues.append(ValidationIssue("error", f"Upstream import failed: {detail}"))

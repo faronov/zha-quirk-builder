@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
+    QProgressDialog,
     QPushButton,
     QSpinBox,
     QSplitter,
@@ -38,6 +39,12 @@ from zha_quirk_builder.model import (
     AttributeSpec,
     QuirkProject,
     efekta_sample,
+)
+from zha_quirk_builder.profiles import (
+    BUNDLED_PROFILE,
+    LATEST_PROFILE,
+    CompatibilityProfile,
+    validate_with_profile,
 )
 from zha_quirk_builder.validator import installed_profile, validate_import, validate_project
 
@@ -66,7 +73,7 @@ QLabel#title {
     font-weight: 700;
 }
 QLabel#muted { color: #68766f; }
-QLabel#profile {
+QComboBox#profile {
     color: #285847;
     background: #e8f1eb;
     border: 1px solid #c9ddd0;
@@ -387,8 +394,12 @@ class MainWindow(QMainWindow):
         title.setObjectName("title")
         heading.addWidget(eyebrow)
         heading.addWidget(title)
-        self.profile = QLabel()
+        self.profile = QComboBox()
         self.profile.setObjectName("profile")
+        self.profile.addItem(BUNDLED_PROFILE.label, BUNDLED_PROFILE)
+        self.profile.addItem(LATEST_PROFILE.label, LATEST_PROFILE)
+        self.profile.addItem("Custom versions…", None)
+        self.profile.currentIndexChanged.connect(self._profile_changed)
         header.addLayout(heading)
         header.addStretch()
         header.addWidget(self.profile)
@@ -495,20 +506,67 @@ class MainWindow(QMainWindow):
             self.result.setText("STRUCTURE OK · Ready for upstream import validation.")
         self.code.setPlainText(generate_quirk(project) if project.attributes else "")
         profile = installed_profile()
-        self.profile.setText(
-            f"zigpy {profile['zigpy']}  ·  ZHA {profile['zha']}  ·  quirks {profile['zha-quirks']}"
+        self.profile.setItemText(
+            0,
+            "Bundled · "
+            f"zigpy {profile['zigpy']} / ZHA {profile['zha']} / quirks {profile['zha-quirks']}",
         )
 
     def _validate(self) -> None:
+        profile = self.profile.currentData()
+        if not isinstance(profile, CompatibilityProfile):
+            return
+        progress = QProgressDialog(
+            f"Preparing {profile.name} compatibility environment…",
+            "",
+            0,
+            0,
+            self,
+        )
+        progress.setWindowTitle("Validating quirk")
+        progress.setCancelButton(None)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.show()
+        QApplication.processEvents()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            issues = validate_import(self._current_project())
+            issues = validate_with_profile(self._current_project(), profile)
         finally:
             QApplication.restoreOverrideCursor()
+            progress.close()
         self.result.setText(
             "\n".join(f"{issue.severity.upper()} · {issue.message}" for issue in issues)
             or "VALID · No compatibility issues found."
         )
+
+    def _profile_changed(self, index: int) -> None:
+        if self.profile.itemData(index) is not None:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Custom compatibility profile")
+        layout = QFormLayout(dialog)
+        zigpy = QLineEdit("2.1.0")
+        zha = QLineEdit("2.2.1")
+        quirks = QLineEdit("2.2.1")
+        layout.addRow("zigpy version", zigpy)
+        layout.addRow("ZHA version", zha)
+        layout.addRow("zha-quirks version", quirks)
+        buttons = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Save)
+        buttons.rejected.connect(dialog.reject)
+        buttons.accepted.connect(dialog.accept)
+        layout.addRow(buttons)
+        if dialog.exec() != QDialog.Accepted:
+            self.profile.setCurrentIndex(0)
+            return
+        versions = (zigpy.text().strip(), zha.text().strip(), quirks.text().strip())
+        if not all(versions):
+            QMessageBox.warning(dialog, "Invalid profile", "All three versions are required.")
+            self.profile.setCurrentIndex(0)
+            return
+        custom = CompatibilityProfile("Custom", *versions)
+        custom_index = self.profile.count() - 1
+        self.profile.insertItem(custom_index, custom.label, custom)
+        self.profile.setCurrentIndex(custom_index)
 
     def _export_python(self) -> None:
         project = self._current_project()

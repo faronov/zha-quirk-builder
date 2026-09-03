@@ -21,6 +21,16 @@ and zha-quirks versions. Dependencies track the current compatible minor release
 line and resolve to the newest version available from the configured package
 index. A successful syntax check alone is not presented as upstream compatibility.
 
+Use the profile selector above the generated Python preview to choose:
+
+- **Bundled** for the versions shipped inside the application;
+- **Latest stable** for the current stable zigpy/ZHA/zha-quirks combination;
+- **Custom versions** to enter an exact three-version compatibility matrix.
+
+Non-bundled profiles are installed into separate cached environments with `uv`.
+Changing a profile never modifies the application environment. The first check
+downloads the selected packages; subsequent checks reuse that profile cache.
+
 ## Desktop packages
 
 GitHub Actions builds:
