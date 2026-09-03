@@ -32,6 +32,8 @@ class AttributeSpec:
     access: str = "rw"
     manufacturer_specific: bool = True
     manufacturer_code: int | None = None
+    define_attribute: bool = True
+    replace_default_entity: bool = False
     entity_kind: str = "number"
     fallback_name: str = ""
     translation_key: str = ""
@@ -43,6 +45,9 @@ class AttributeSpec:
     divisor: int | None = None
     multiplier: int | None = None
     state_class: str = ""
+    reporting_min_interval: int | None = None
+    reporting_max_interval: int | None = None
+    reporting_change: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AttributeSpec:

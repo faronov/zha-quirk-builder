@@ -39,7 +39,7 @@ def _entity_lines(attribute: AttributeSpec) -> list[str]:
     ]
     for name, value in (
         ("translation_key", attribute.translation_key),
-        ("fallback_name", attribute.fallback_name),
+        ("fallback_name", attribute.fallback_name or attribute.name.replace("_", " ").title()),
     ):
         argument = _value_argument(name, value)
         if argument:
@@ -79,6 +79,14 @@ def _entity_lines(attribute: AttributeSpec) -> list[str]:
             argument = _value_argument(name, value)
             if argument:
                 arguments.append(argument)
+    if attribute.reporting_min_interval is not None:
+        arguments.append(
+            "reporting_config=ReportingConfig(\n"
+            f"                min_interval={attribute.reporting_min_interval},\n"
+            f"                max_interval={attribute.reporting_max_interval},\n"
+            f"                reportable_change={attribute.reporting_change},\n"
+            "            )"
+        )
 
     body = ",\n            ".join(arguments)
     return [f"    .{attribute.entity_kind}(", f"        {body},", "    )"]
@@ -87,17 +95,25 @@ def _entity_lines(attribute: AttributeSpec) -> list[str]:
 def generate_quirk(project: QuirkProject) -> str:
     grouped: dict[tuple[int, int], list[AttributeSpec]] = defaultdict(list)
     for attribute in project.attributes:
-        grouped[(attribute.cluster_id, attribute.endpoint_id)].append(attribute)
+        if attribute.define_attribute:
+            grouped[(attribute.cluster_id, attribute.endpoint_id)].append(attribute)
 
     lines = [
         f'"""ZHA quirk for {project.manufacturer} {project.model}."""',
         "",
         "import zigpy.types as t",
-        "from zigpy.quirks import CustomCluster",
-        "from zigpy.zcl.foundation import BaseAttributeDefs, ZCLAttributeDef",
-        "from zhaquirks.builder import QuirkBuilder",
-        "",
     ]
+    if grouped:
+        lines.extend(
+            [
+                "from zigpy.quirks import CustomCluster",
+                "from zigpy.zcl.foundation import BaseAttributeDefs, ZCLAttributeDef",
+            ]
+        )
+    builder_imports = ["QuirkBuilder"]
+    if any(attribute.reporting_min_interval is not None for attribute in project.attributes):
+        builder_imports.append("ReportingConfig")
+    lines.extend([f"from zhaquirks.builder import {', '.join(builder_imports)}", ""])
 
     for (cluster_id, endpoint_id), attributes in sorted(grouped.items()):
         class_name = class_identifier(project, cluster_id, endpoint_id)
@@ -136,6 +152,12 @@ def generate_quirk(project: QuirkProject) -> str:
             f"    .replaces({class_identifier(project, cluster_id, endpoint_id)}, "
             f"endpoint_id={endpoint_id})"
         )
+    for attribute in project.attributes:
+        if attribute.replace_default_entity:
+            lines.append(
+                "    .prevent_default_entity_creation("
+                f"endpoint_id={attribute.endpoint_id}, cluster_id=0x{attribute.cluster_id:04X})"
+            )
     for attribute in project.attributes:
         lines.extend(_entity_lines(attribute))
     lines.extend(["    .add_to_registry()", ")", ""])

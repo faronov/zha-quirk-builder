@@ -63,6 +63,29 @@ def validate_project(project: QuirkProject) -> list[ValidationIssue]:
             issues.append(ValidationIssue("error", f"{prefix}: invalid attribute ID."))
         if attribute.access not in {"r", "w", "rw", "rp", "rwp"}:
             issues.append(ValidationIssue("error", f"{prefix}: unsupported access mode."))
+        reporting = (
+            attribute.reporting_min_interval,
+            attribute.reporting_max_interval,
+            attribute.reporting_change,
+        )
+        if any(value is not None for value in reporting):
+            if any(value is None for value in reporting):
+                issues.append(
+                    ValidationIssue(
+                        "error",
+                        f"{prefix}: reporting requires min interval, max interval and change.",
+                    )
+                )
+            elif not 0 <= attribute.reporting_min_interval <= 0xFFFF:
+                issues.append(ValidationIssue("error", f"{prefix}: invalid reporting minimum."))
+            elif not 1 <= attribute.reporting_max_interval <= 0xFFFF:
+                issues.append(ValidationIssue("error", f"{prefix}: invalid reporting maximum."))
+            elif attribute.reporting_min_interval > attribute.reporting_max_interval:
+                issues.append(
+                    ValidationIssue("error", f"{prefix}: reporting minimum exceeds maximum.")
+                )
+            elif attribute.reporting_change < 0:
+                issues.append(ValidationIssue("error", f"{prefix}: reporting change is negative."))
         if attribute.entity_kind == "number":
             if attribute.min_value is None or attribute.max_value is None:
                 issues.append(

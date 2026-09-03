@@ -204,6 +204,10 @@ class AttributeDialog(QDialog):
         self.access.setCurrentText(source.access)
         self.manufacturer_specific = QCheckBox("Manufacturer-specific attribute")
         self.manufacturer_specific.setChecked(source.manufacturer_specific)
+        self.define_attribute = QCheckBox("Define attribute in a CustomCluster")
+        self.define_attribute.setChecked(source.define_attribute)
+        self.replace_default_entity = QCheckBox("Replace ZHA default entity for this cluster")
+        self.replace_default_entity.setChecked(source.replace_default_entity)
         self.manufacturer_code = QLineEdit(
             f"0x{source.manufacturer_code:04X}" if source.manufacturer_code is not None else ""
         )
@@ -222,6 +226,15 @@ class AttributeDialog(QDialog):
         self.state_class = QComboBox()
         self.state_class.addItems(("", "measurement", "total", "total_increasing"))
         self.state_class.setCurrentText(source.state_class)
+        self.reporting_min = QLineEdit(
+            "" if source.reporting_min_interval is None else str(source.reporting_min_interval)
+        )
+        self.reporting_max = QLineEdit(
+            "" if source.reporting_max_interval is None else str(source.reporting_max_interval)
+        )
+        self.reporting_change = QLineEdit(
+            "" if source.reporting_change is None else str(source.reporting_change)
+        )
 
         for label, widget in (
             ("Python attribute name", self.name),
@@ -231,6 +244,8 @@ class AttributeDialog(QDialog):
             ("zigpy datatype", self.data_type),
             ("Access", self.access),
             ("Flags", self.manufacturer_specific),
+            ("Cluster definition", self.define_attribute),
+            ("Default entity", self.replace_default_entity),
             ("Manufacturer code", self.manufacturer_code),
             ("Entity", self.entity_kind),
             ("Fallback name", self.fallback_name),
@@ -243,6 +258,9 @@ class AttributeDialog(QDialog):
             ("Divisor", self.divisor),
             ("Multiplier", self.multiplier),
             ("State class", self.state_class),
+            ("Reporting min (seconds)", self.reporting_min),
+            ("Reporting max (seconds)", self.reporting_max),
+            ("Reporting change (raw ZCL)", self.reporting_change),
         ):
             form.addRow(label, widget)
 
@@ -272,6 +290,8 @@ class AttributeDialog(QDialog):
             access=self.access.currentText(),
             manufacturer_specific=self.manufacturer_specific.isChecked(),
             manufacturer_code=parse_optional_int(self.manufacturer_code.text()),
+            define_attribute=self.define_attribute.isChecked(),
+            replace_default_entity=self.replace_default_entity.isChecked(),
             entity_kind=self.entity_kind.currentText(),
             fallback_name=self.fallback_name.text().strip(),
             translation_key=self.translation_key.text().strip(),
@@ -283,6 +303,9 @@ class AttributeDialog(QDialog):
             divisor=parse_optional_int(self.divisor.text()),
             multiplier=parse_optional_int(self.multiplier.text()),
             state_class=self.state_class.currentText(),
+            reporting_min_interval=parse_optional_int(self.reporting_min.text()),
+            reporting_max_interval=parse_optional_int(self.reporting_max.text()),
+            reporting_change=parse_optional_int(self.reporting_change.text()),
         )
 
 
@@ -351,12 +374,12 @@ class MainWindow(QMainWindow):
         mapping_label = QLabel("ATTRIBUTE MAPPINGS")
         mapping_label.setObjectName("eyebrow")
         layout.addWidget(mapping_label)
-        self.table = QTableWidget(0, 7)
+        self.table = QTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels(
-            ("Name", "Endpoint", "Cluster", "Attribute", "Type", "Entity", "Label")
+            ("Name", "Endpoint", "Cluster", "Attribute", "Type", "Entity", "Reporting", "Label")
         )
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.Stretch)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
@@ -460,6 +483,13 @@ class MainWindow(QMainWindow):
                 f"0x{attribute.attribute_id:04X}",
                 attribute.data_type,
                 attribute.entity_kind,
+                (
+                    f"{attribute.reporting_min_interval}/"
+                    f"{attribute.reporting_max_interval}/"
+                    f"{attribute.reporting_change}"
+                    if attribute.reporting_min_interval is not None
+                    else "ZHA default"
+                ),
                 attribute.fallback_name,
             )
             for column, value in enumerate(values):
