@@ -9,6 +9,7 @@ description = "Standalone visual builder and compatibility validator for ZHA Qui
 requires-python = ">=3.12"
 dependencies = [
   "PySide6==6.11.2",
+  "cryptography>=44,<50",
   "uv==0.10.2",
   "zigpy>=2.1,<2.2",
   "zha>=2.2,<2.3",
