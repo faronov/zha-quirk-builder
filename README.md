@@ -35,8 +35,9 @@ downloads the selected packages; subsequent checks reuse that profile cache.
 
 GitHub Actions builds:
 
-- `ZHA-Quirk-Builder-windows-x64.zip` containing a standalone `.exe`;
-- `ZHA-Quirk-Builder-macos-x64.zip` containing a standalone `.app`.
+- Windows x64 and ARM64 ZIP archives containing a standalone `.exe`;
+- macOS Intel x64 and Apple Silicon ARM64 ZIP archives containing a standalone `.app`;
+- Linux x64 and ARM64 `.tar.gz` archives containing a standalone executable.
 
 No separate Python installation is required for packaged applications. Push a
 tag such as `v0.1.0` to create a GitHub release containing both archives.

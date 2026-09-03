@@ -34,7 +34,7 @@ analysis = Analysis(
 )
 pyz = PYZ(analysis.pure)
 
-if sys.platform == "win32":
+if sys.platform in {"win32", "linux"}:
     executable = EXE(
         pyz,
         analysis.scripts,
@@ -51,7 +51,7 @@ if sys.platform == "win32":
         argv_emulation=False,
         target_arch=None,
     )
-else:
+elif sys.platform == "darwin":
     executable = EXE(
         pyz,
         analysis.scripts,
@@ -86,3 +86,5 @@ else:
             "NSHighResolutionCapable": True,
         },
     )
+else:
+    raise RuntimeError(f"Unsupported packaging platform: {sys.platform}")

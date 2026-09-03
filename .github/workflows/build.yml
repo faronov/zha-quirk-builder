@@ -19,8 +19,16 @@ jobs:
         include:
           - os: windows-latest
             artifact: windows-x64
-          - os: macos-13
+          - os: windows-11-arm
+            artifact: windows-arm64
+          - os: macos-15-intel
             artifact: macos-x64
+          - os: macos-15
+            artifact: macos-arm64
+          - os: ubuntu-24.04
+            artifact: linux-x64
+          - os: ubuntu-24.04-arm
+            artifact: linux-arm64
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -50,19 +58,29 @@ jobs:
         if: runner.os == 'macOS'
         run: '"dist/ZHA Quirk Builder.app/Contents/MacOS/ZHA Quirk Builder" --self-test'
 
+      - name: Smoke test Linux executable
+        if: runner.os == 'Linux'
+        run: '"dist/ZHA Quirk Builder" --self-test'
+
       - name: Package Windows application
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path "dist/ZHA Quirk Builder.exe" -DestinationPath "ZHA-Quirk-Builder-windows-x64.zip"
+        run: Compress-Archive -Path "dist/ZHA Quirk Builder.exe" -DestinationPath "ZHA-Quirk-Builder-${{ matrix.artifact }}.zip"
 
       - name: Package macOS application
         if: runner.os == 'macOS'
-        run: ditto -c -k --sequesterRsrc --keepParent "dist/ZHA Quirk Builder.app" "ZHA-Quirk-Builder-macos-x64.zip"
+        run: ditto -c -k --sequesterRsrc --keepParent "dist/ZHA Quirk Builder.app" "ZHA-Quirk-Builder-${{ matrix.artifact }}.zip"
+
+      - name: Package Linux application
+        if: runner.os == 'Linux'
+        run: tar -czf "ZHA-Quirk-Builder-${{ matrix.artifact }}.tar.gz" -C dist "ZHA Quirk Builder"
 
       - uses: actions/upload-artifact@v4
         with:
           name: ZHA-Quirk-Builder-${{ matrix.artifact }}
-          path: ZHA-Quirk-Builder-*.zip
+          path: |
+            ZHA-Quirk-Builder-*.zip
+            ZHA-Quirk-Builder-*.tar.gz
           if-no-files-found: error
 
   release:
@@ -79,4 +97,4 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release/*.zip --generate-notes --verify-tag
+        run: gh release create "$GITHUB_REF_NAME" release/* --generate-notes --verify-tag
