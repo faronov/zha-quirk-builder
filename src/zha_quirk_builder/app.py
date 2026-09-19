@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressDialog,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QSplitter,
     QTableWidget,
@@ -186,9 +187,18 @@ class AttributeDialog(QDialog):
         heading = QLabel("MAP ZIGBEE ATTRIBUTE")
         heading.setObjectName("eyebrow")
         layout.addWidget(heading)
-        form = QFormLayout()
+
+        scroll_area = QScrollArea()
+        scroll_area.setObjectName("attributeScrollArea")
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        form_widget = QWidget()
+        form = QFormLayout(form_widget)
+        form.setContentsMargins(0, 0, 0, 0)
         form.setVerticalSpacing(11)
-        layout.addLayout(form)
+        scroll_area.setWidget(form_widget)
+        layout.addWidget(scroll_area)
 
         self.name = QLineEdit(source.name)
         self.cluster_id = QLineEdit(f"0x{source.cluster_id:04X}")
@@ -268,6 +278,9 @@ class AttributeDialog(QDialog):
         buttons.rejected.connect(self.reject)
         buttons.accepted.connect(self._accept_if_valid)
         layout.addWidget(buttons)
+
+        available_height = self.screen().availableGeometry().height()
+        self.resize(620, min(800, max(320, available_height - 80)))
 
     def _accept_if_valid(self) -> None:
         try:
