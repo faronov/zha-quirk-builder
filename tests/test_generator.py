@@ -65,3 +65,32 @@ def test_standard_cluster_reporting_override() -> None:
     assert "min_interval=30" in source
     assert "max_interval=300" in source
     assert "reportable_change=25" in source
+
+
+def test_enum_entity_generates_enum_class_and_builder_call() -> None:
+    project = QuirkProject(
+        manufacturer="EFEKTA",
+        model="TH_DUO_LR",
+        attributes=[
+            AttributeSpec(
+                name="tx_radio_power",
+                cluster_id=0x0001,
+                attribute_id=0xFF01,
+                data_type="enum8",
+                entity_kind="enum",
+                enum_class="TxRadioPowerEnum",
+                enum_values={"MINUS_20_DBM": 0, "PLUS_4_DBM": 1},
+                translation_key="tx_radio_power",
+                fallback_name="Set TX Radio Power",
+            )
+        ],
+    )
+
+    source = generate_quirk(project)
+
+    ast.parse(source)
+    assert "class TxRadioPowerEnum(t.enum8):" in source
+    assert "type=TxRadioPowerEnum" in source
+    assert ".enum(" in source
+    assert "'tx_radio_power',\n            TxRadioPowerEnum," in source
+    assert validate_project(project) == []

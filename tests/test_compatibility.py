@@ -38,3 +38,27 @@ def test_standard_reporting_override_imports_with_upstream_stack() -> None:
     issues = validate_import(project)
 
     assert issues[-1].severity == "success", issues
+
+
+def test_enum_entity_imports_with_upstream_stack() -> None:
+    project = QuirkProject(
+        manufacturer="EFEKTA",
+        model="TH_DUO_LR",
+        attributes=[
+            AttributeSpec(
+                name="tx_radio_power",
+                cluster_id=0x0001,
+                attribute_id=0xFF01,
+                data_type="enum8",
+                entity_kind="enum",
+                enum_class="TxRadioPowerEnum",
+                enum_values={"MINUS_20_DBM": 0, "PLUS_4_DBM": 1},
+                translation_key="tx_radio_power",
+                fallback_name="Set TX Radio Power",
+            )
+        ],
+    )
+
+    issues = validate_import(project)
+
+    assert issues[-1].severity == "success", issues

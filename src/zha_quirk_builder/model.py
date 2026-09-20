@@ -19,7 +19,7 @@ ZIGPY_TYPES = {
     "float": "t.Single",
 }
 
-ENTITY_KINDS = ("sensor", "number", "switch", "binary_sensor")
+ENTITY_KINDS = ("sensor", "number", "switch", "binary_sensor", "enum")
 
 
 @dataclass(slots=True)
@@ -45,6 +45,8 @@ class AttributeSpec:
     divisor: int | None = None
     multiplier: int | None = None
     state_class: str = ""
+    enum_class: str = ""
+    enum_values: dict[str, int] = field(default_factory=dict)
     reporting_min_interval: int | None = None
     reporting_max_interval: int | None = None
     reporting_change: int | None = None

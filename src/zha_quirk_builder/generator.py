@@ -25,6 +25,13 @@ def class_identifier(project: QuirkProject, cluster_id: int, endpoint_id: int) -
     return f"{model}Cluster{cluster_id:04X}Endpoint{endpoint_id}"
 
 
+def enum_class_identifier(attribute: AttributeSpec) -> str:
+    if attribute.enum_class:
+        return attribute.enum_class
+    name = re.sub(r"[^A-Za-z0-9]+", " ", attribute.name).title().replace(" ", "")
+    return f"{name}Enum"
+
+
 def _value_argument(name: str, value: object | None) -> str | None:
     if value is None or value == "":
         return None
@@ -32,11 +39,15 @@ def _value_argument(name: str, value: object | None) -> str | None:
 
 
 def _entity_lines(attribute: AttributeSpec) -> list[str]:
-    arguments = [
-        repr(attribute.name),
-        f"cluster_id=0x{attribute.cluster_id:04X}",
-        f"endpoint_id={attribute.endpoint_id}",
-    ]
+    arguments = [repr(attribute.name)]
+    if attribute.entity_kind == "enum":
+        arguments.append(enum_class_identifier(attribute))
+    arguments.extend(
+        [
+            f"cluster_id=0x{attribute.cluster_id:04X}",
+            f"endpoint_id={attribute.endpoint_id}",
+        ]
+    )
     for name, value in (
         ("translation_key", attribute.translation_key),
         ("fallback_name", attribute.fallback_name or attribute.name.replace("_", " ").title()),
@@ -115,6 +126,19 @@ def generate_quirk(project: QuirkProject) -> str:
         builder_imports.append("ReportingConfig")
     lines.extend([f"from zhaquirks.builder import {', '.join(builder_imports)}", ""])
 
+    enum_classes: dict[str, AttributeSpec] = {}
+    for attribute in project.attributes:
+        if attribute.entity_kind == "enum":
+            enum_classes.setdefault(enum_class_identifier(attribute), attribute)
+    for enum_class, attribute in enum_classes.items():
+        lines.append(f"class {enum_class}(t.{attribute.data_type}):")
+        if attribute.enum_values:
+            for name, value in attribute.enum_values.items():
+                lines.append(f"    {name} = {value}")
+        else:
+            lines.append("    pass")
+        lines.append("")
+
     for (cluster_id, endpoint_id), attributes in sorted(grouped.items()):
         class_name = class_identifier(project, cluster_id, endpoint_id)
         lines.extend(
@@ -126,9 +150,14 @@ def generate_quirk(project: QuirkProject) -> str:
             ]
         )
         for attribute in attributes:
+            attribute_type = (
+                enum_class_identifier(attribute)
+                if attribute.entity_kind == "enum"
+                else ZIGPY_TYPES[attribute.data_type]
+            )
             definition = [
                 f"id=0x{attribute.attribute_id:04X}",
-                f"type={ZIGPY_TYPES[attribute.data_type]}",
+                f"type={attribute_type}",
                 f"access={attribute.access!r}",
             ]
             if attribute.manufacturer_specific:

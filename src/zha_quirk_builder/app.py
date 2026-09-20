@@ -165,6 +165,21 @@ def parse_optional_float(value: str) -> float | None:
     return float(value.strip()) if value.strip() else None
 
 
+def parse_enum_values(value: str) -> dict[str, int]:
+    values: dict[str, int] = {}
+    for item in value.split(","):
+        if not item.strip():
+            continue
+        name, separator, raw_value = item.partition("=")
+        name = name.strip()
+        if not separator or not name:
+            raise ValueError("Enum values must use NAME=value pairs separated by commas.")
+        if name in values:
+            raise ValueError(f"Duplicate enum value name: {name}.")
+        values[name] = parse_int(raw_value)
+    return values
+
+
 class AttributeDialog(QDialog):
     def __init__(self, parent: QWidget, attribute: AttributeSpec | None = None) -> None:
         super().__init__(parent)
@@ -236,6 +251,12 @@ class AttributeDialog(QDialog):
         self.state_class = QComboBox()
         self.state_class.addItems(("", "measurement", "total", "total_increasing"))
         self.state_class.setCurrentText(source.state_class)
+        self.enum_class = QLineEdit(source.enum_class)
+        self.enum_class.setPlaceholderText("TxRadioPowerEnum")
+        self.enum_values = QLineEdit(
+            ", ".join(f"{name}={value}" for name, value in source.enum_values.items())
+        )
+        self.enum_values.setPlaceholderText("LOW=0, MEDIUM=1, HIGH=2")
         self.reporting_min = QLineEdit(
             "" if source.reporting_min_interval is None else str(source.reporting_min_interval)
         )
@@ -268,11 +289,16 @@ class AttributeDialog(QDialog):
             ("Divisor", self.divisor),
             ("Multiplier", self.multiplier),
             ("State class", self.state_class),
+            ("Enum class", self.enum_class),
+            ("Enum values", self.enum_values),
             ("Reporting min (seconds)", self.reporting_min),
             ("Reporting max (seconds)", self.reporting_max),
             ("Reporting change (raw ZCL)", self.reporting_change),
         ):
             form.addRow(label, widget)
+
+        self.entity_kind.currentTextChanged.connect(self._update_entity_fields)
+        self._update_entity_fields(self.entity_kind.currentText())
 
         buttons = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Save)
         buttons.rejected.connect(self.reject)
@@ -281,6 +307,13 @@ class AttributeDialog(QDialog):
 
         available_height = self.screen().availableGeometry().height()
         self.resize(620, min(800, max(320, available_height - 80)))
+
+    def _update_entity_fields(self, entity_kind: str) -> None:
+        is_enum = entity_kind == "enum"
+        self.enum_class.setEnabled(is_enum)
+        self.enum_values.setEnabled(is_enum)
+        if is_enum and self.data_type.currentText() not in {"enum8", "enum16"}:
+            self.data_type.setCurrentText("enum8")
 
     def _accept_if_valid(self) -> None:
         try:
@@ -294,6 +327,7 @@ class AttributeDialog(QDialog):
         name = self.name.text().strip()
         if name != python_identifier(name):
             raise ValueError("Attribute name must be a snake_case Python identifier.")
+        entity_kind = self.entity_kind.currentText()
         return AttributeSpec(
             name=name,
             cluster_id=parse_int(self.cluster_id.text()),
@@ -305,7 +339,7 @@ class AttributeDialog(QDialog):
             manufacturer_code=parse_optional_int(self.manufacturer_code.text()),
             define_attribute=self.define_attribute.isChecked(),
             replace_default_entity=self.replace_default_entity.isChecked(),
-            entity_kind=self.entity_kind.currentText(),
+            entity_kind=entity_kind,
             fallback_name=self.fallback_name.text().strip(),
             translation_key=self.translation_key.text().strip(),
             device_class=self.device_class.text().strip(),
@@ -316,6 +350,8 @@ class AttributeDialog(QDialog):
             divisor=parse_optional_int(self.divisor.text()),
             multiplier=parse_optional_int(self.multiplier.text()),
             state_class=self.state_class.currentText(),
+            enum_class=self.enum_class.text().strip() if entity_kind == "enum" else "",
+            enum_values=parse_enum_values(self.enum_values.text()) if entity_kind == "enum" else {},
             reporting_min_interval=parse_optional_int(self.reporting_min.text()),
             reporting_max_interval=parse_optional_int(self.reporting_max.text()),
             reporting_change=parse_optional_int(self.reporting_change.text()),

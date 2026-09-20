@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import ast
 import importlib.metadata
+import keyword
 import multiprocessing
 import sys
 import traceback
 from dataclasses import dataclass
 from multiprocessing.connection import Connection
 
-from zha_quirk_builder.generator import generate_quirk, python_identifier
+from zha_quirk_builder.generator import enum_class_identifier, generate_quirk, python_identifier
 from zha_quirk_builder.model import ENTITY_KINDS, ZIGPY_TYPES, QuirkProject
 
 
@@ -29,6 +30,7 @@ def validate_project(project: QuirkProject) -> list[ValidationIssue]:
 
     seen: set[tuple[int, int, int]] = set()
     names: set[tuple[int, int, str]] = set()
+    enum_classes: dict[str, tuple[str, dict[str, int]]] = {}
     for index, attribute in enumerate(project.attributes, 1):
         prefix = f"Attribute {index}"
         if attribute.name != python_identifier(attribute.name):
@@ -93,6 +95,37 @@ def validate_project(project: QuirkProject) -> list[ValidationIssue]:
                 )
             elif attribute.min_value >= attribute.max_value:
                 issues.append(ValidationIssue("error", f"{prefix}: minimum must be below maximum."))
+        if attribute.entity_kind == "enum":
+            enum_class = enum_class_identifier(attribute)
+            if not enum_class.isidentifier() or keyword.iskeyword(enum_class):
+                issues.append(ValidationIssue("error", f"{prefix}: invalid enum class name."))
+            if attribute.data_type not in {"enum8", "enum16"}:
+                issues.append(
+                    ValidationIssue("error", f"{prefix}: Enum requires enum8 or enum16 datatype.")
+                )
+            if not attribute.enum_values:
+                issues.append(ValidationIssue("error", f"{prefix}: Enum requires values."))
+            maximum = 0xFF if attribute.data_type == "enum8" else 0xFFFF
+            for name, value in attribute.enum_values.items():
+                if not name.isidentifier() or keyword.iskeyword(name):
+                    issues.append(
+                        ValidationIssue("error", f"{prefix}: invalid enum value name {name!r}.")
+                    )
+                if not isinstance(value, int) or not 0 <= value <= maximum:
+                    issues.append(
+                        ValidationIssue(
+                            "error",
+                            f"{prefix}: enum value {name!r} must be 0..{maximum}.",
+                        )
+                    )
+            enum_definition = (attribute.data_type, attribute.enum_values)
+            previous_definition = enum_classes.setdefault(enum_class, enum_definition)
+            if previous_definition != enum_definition:
+                issues.append(
+                    ValidationIssue(
+                        "error", f"{prefix}: enum class {enum_class!r} has conflicting values."
+                    )
+                )
 
     if not issues:
         try:
