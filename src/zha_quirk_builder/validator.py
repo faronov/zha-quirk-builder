@@ -9,7 +9,12 @@ import traceback
 from dataclasses import dataclass
 from multiprocessing.connection import Connection
 
-from zha_quirk_builder.generator import enum_class_identifier, generate_quirk, python_identifier
+from zha_quirk_builder.generator import (
+    enum_class_identifier,
+    generate_quirk,
+    python_identifier,
+    standard_cluster_class,
+)
 from zha_quirk_builder.model import ENTITY_KINDS, ZIGPY_TYPES, QuirkProject
 
 
@@ -51,6 +56,16 @@ def validate_project(project: QuirkProject) -> list[ValidationIssue]:
             issues.append(ValidationIssue("error", f"{prefix}: unsupported zigpy datatype."))
         if attribute.entity_kind not in ENTITY_KINDS:
             issues.append(ValidationIssue("error", f"{prefix}: unsupported entity kind."))
+        cluster_class = standard_cluster_class(attribute.cluster_id)
+        if not attribute.define_attribute and (
+            cluster_class is None or attribute.name not in cluster_class.attributes_by_name
+        ):
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    f"{prefix}: custom attribute must be defined in a CustomCluster.",
+                )
+            )
         if not attribute.translation_key and not attribute.device_class:
             issues.append(
                 ValidationIssue(

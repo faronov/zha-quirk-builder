@@ -4,6 +4,8 @@ import keyword
 import re
 from collections import defaultdict
 
+from zigpy.zcl import Cluster
+
 from zha_quirk_builder.model import ZIGPY_TYPES, AttributeSpec, QuirkProject
 
 
@@ -30,6 +32,10 @@ def enum_class_identifier(attribute: AttributeSpec) -> str:
         return attribute.enum_class
     name = re.sub(r"[^A-Za-z0-9]+", " ", attribute.name).title().replace(" ", "")
     return f"{name}Enum"
+
+
+def standard_cluster_class(cluster_id: int) -> type[Cluster] | None:
+    return Cluster._registry.get(cluster_id)
 
 
 def _value_argument(name: str, value: object | None) -> str | None:
@@ -117,10 +123,17 @@ def generate_quirk(project: QuirkProject) -> str:
     if grouped:
         lines.extend(
             [
-                "from zigpy.quirks import CustomCluster",
+                "from zhaquirks.clusters import CustomCluster",
                 "from zigpy.zcl.foundation import BaseAttributeDefs, ZCLAttributeDef",
             ]
         )
+        cluster_imports: dict[str, set[str]] = defaultdict(set)
+        for cluster_id, _endpoint_id in grouped:
+            cluster_class = standard_cluster_class(cluster_id)
+            if cluster_class is not None:
+                cluster_imports[cluster_class.__module__].add(cluster_class.__name__)
+        for module, class_names in sorted(cluster_imports.items()):
+            lines.append(f"from {module} import {', '.join(sorted(class_names))}")
     builder_imports = ["QuirkBuilder"]
     if any(attribute.reporting_min_interval is not None for attribute in project.attributes):
         builder_imports.append("ReportingConfig")
@@ -141,12 +154,19 @@ def generate_quirk(project: QuirkProject) -> str:
 
     for (cluster_id, endpoint_id), attributes in sorted(grouped.items()):
         class_name = class_identifier(project, cluster_id, endpoint_id)
+        cluster_class = standard_cluster_class(cluster_id)
+        base_classes = (
+            f"CustomCluster, {cluster_class.__name__}" if cluster_class else "CustomCluster"
+        )
+        attribute_defs_base = (
+            f"{cluster_class.__name__}.AttributeDefs" if cluster_class else "BaseAttributeDefs"
+        )
         lines.extend(
             [
-                f"class {class_name}(CustomCluster):",
+                f"class {class_name}({base_classes}):",
                 f"    cluster_id = 0x{cluster_id:04X}",
                 "",
-                "    class AttributeDefs(BaseAttributeDefs):",
+                f"    class AttributeDefs({attribute_defs_base}):",
             ]
         )
         for attribute in attributes:

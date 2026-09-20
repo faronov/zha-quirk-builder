@@ -10,6 +10,11 @@ def test_efekta_sample_generates_valid_quirk_v2_python() -> None:
 
     ast.parse(source)
     assert "QuirkBuilder('EFEKTA', 'EFEKTA_iAQ3')" in source
+    assert (
+        "class EfektaIaq3Cluster040DEndpoint1("
+        "CustomCluster, CarbonDioxideConcentration):" in source
+    )
+    assert "class AttributeDefs(CarbonDioxideConcentration.AttributeDefs):" in source
     assert ".replaces(EfektaIaq3Cluster040DEndpoint1, endpoint_id=1)" in source
     assert "report_delay = ZCLAttributeDef(id=0x0201" in source
     assert ".number(" in source
@@ -94,3 +99,52 @@ def test_enum_entity_generates_enum_class_and_builder_call() -> None:
     assert ".enum(" in source
     assert "'tx_radio_power',\n            TxRadioPowerEnum," in source
     assert validate_project(project) == []
+
+
+def test_custom_attributes_preserve_standard_cluster_attributes() -> None:
+    project = QuirkProject(
+        manufacturer="EfektaLab",
+        model="EFEKTA_TH_Max",
+        attributes=[
+            AttributeSpec(
+                name="air_enthalpy",
+                cluster_id=0x0402,
+                attribute_id=0x0204,
+                data_type="int16",
+                entity_kind="sensor",
+                translation_key="air_enthalpy",
+                fallback_name="Air enthalpy",
+                divisor=100,
+            )
+        ],
+    )
+
+    source = generate_quirk(project)
+    namespace = {"__name__": "generated_quirk", "__file__": "<generated-quirk>"}
+    exec(compile(source, "<generated-quirk>", "exec"), namespace)  # noqa: S102
+    cluster = namespace["EfektaThMaxCluster0402Endpoint1"]
+
+    assert "measured_value" in cluster.attributes_by_name
+    assert "air_enthalpy" in cluster.attributes_by_name
+
+
+def test_undefined_custom_attribute_is_rejected() -> None:
+    project = QuirkProject(
+        manufacturer="EfektaLab",
+        model="EFEKTA_TH_Max",
+        attributes=[
+            AttributeSpec(
+                name="air_enthalpy",
+                cluster_id=0x0402,
+                attribute_id=0x0204,
+                data_type="int16",
+                define_attribute=False,
+                entity_kind="sensor",
+                translation_key="air_enthalpy",
+            )
+        ],
+    )
+
+    issues = validate_project(project)
+
+    assert any("must be defined in a CustomCluster" in issue.message for issue in issues)
