@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from multiprocessing.connection import Connection
 
 from zha_quirk_builder.generator import (
+    entity_unique_id_suffix,
     enum_class_identifier,
     generate_quirk,
     python_identifier,
@@ -36,6 +37,7 @@ def validate_project(project: QuirkProject) -> list[ValidationIssue]:
     seen: set[tuple[int, int, int]] = set()
     names: set[tuple[int, int, str]] = set()
     enum_classes: dict[str, tuple[str, dict[str, int]]] = {}
+    entity_unique_ids: set[tuple[int, str]] = set()
     for index, attribute in enumerate(project.attributes, 1):
         prefix = f"Attribute {index}"
         if attribute.name != python_identifier(attribute.name):
@@ -52,6 +54,17 @@ def validate_project(project: QuirkProject) -> list[ValidationIssue]:
         if name_key in names:
             issues.append(ValidationIssue("error", f"{prefix}: duplicate attribute name."))
         names.add(name_key)
+        entity_unique_id = (attribute.endpoint_id, entity_unique_id_suffix(attribute))
+        if entity_unique_id in entity_unique_ids:
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    f"{prefix}: duplicate entity unique ID suffix "
+                    f"{entity_unique_id_suffix(attribute)!r} on endpoint "
+                    f"{attribute.endpoint_id}.",
+                )
+            )
+        entity_unique_ids.add(entity_unique_id)
         if attribute.data_type not in ZIGPY_TYPES:
             issues.append(ValidationIssue("error", f"{prefix}: unsupported zigpy datatype."))
         if attribute.entity_kind not in ENTITY_KINDS:

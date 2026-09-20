@@ -21,7 +21,13 @@ def test_efekta_sample_generates_valid_quirk_v2_python() -> None:
     assert ".switch(" in source
     assert "multiplier=0.1" in source
     assert "from zhaquirks.builder import QuirkBuilder" in source
-    assert ".prevent_default_entity_creation(endpoint_id=1, cluster_id=0x0402)" in source
+    assert (
+        ".prevent_default_entity_creation(endpoint_id=1, cluster_id=0x0402, "
+        "unique_id_suffix='1-1026')" in source
+    )
+    assert "unique_id_suffix='temperature'" in source
+    assert "unique_id_suffix='humidity'" in source
+    assert "unique_id_suffix='battery'" in source
     assert "reportable_change=25" in source
     assert "reportable_change=50" in source
     assert "max_interval=21600" in source
@@ -66,7 +72,10 @@ def test_standard_cluster_reporting_override() -> None:
     ast.parse(source)
     assert "class TemperatureCluster" not in source
     assert "from zhaquirks.builder import QuirkBuilder, ReportingConfig" in source
-    assert ".prevent_default_entity_creation(endpoint_id=1, cluster_id=0x0402)" in source
+    assert (
+        ".prevent_default_entity_creation(endpoint_id=1, cluster_id=0x0402, "
+        "unique_id_suffix='1-1026')" in source
+    )
     assert "min_interval=30" in source
     assert "max_interval=300" in source
     assert "reportable_change=25" in source

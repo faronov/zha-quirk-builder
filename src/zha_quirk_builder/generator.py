@@ -38,6 +38,10 @@ def standard_cluster_class(cluster_id: int) -> type[Cluster] | None:
     return Cluster._registry.get(cluster_id)
 
 
+def entity_unique_id_suffix(attribute: AttributeSpec) -> str:
+    return attribute.translation_key or attribute.device_class or attribute.name
+
+
 def _value_argument(name: str, value: object | None) -> str | None:
     if value is None or value == "":
         return None
@@ -57,6 +61,7 @@ def _entity_lines(attribute: AttributeSpec) -> list[str]:
     for name, value in (
         ("translation_key", attribute.translation_key),
         ("fallback_name", attribute.fallback_name or attribute.name.replace("_", " ").title()),
+        ("unique_id_suffix", entity_unique_id_suffix(attribute)),
     ):
         argument = _value_argument(name, value)
         if argument:
@@ -201,12 +206,18 @@ def generate_quirk(project: QuirkProject) -> str:
             f"    .replaces({class_identifier(project, cluster_id, endpoint_id)}, "
             f"endpoint_id={endpoint_id})"
         )
-    for attribute in project.attributes:
-        if attribute.replace_default_entity:
-            lines.append(
-                "    .prevent_default_entity_creation("
-                f"endpoint_id={attribute.endpoint_id}, cluster_id=0x{attribute.cluster_id:04X})"
-            )
+    replaced_default_entities = {
+        (attribute.endpoint_id, attribute.cluster_id)
+        for attribute in project.attributes
+        if attribute.replace_default_entity
+    }
+    for endpoint_id, cluster_id in sorted(replaced_default_entities):
+        default_unique_id_suffix = f"{endpoint_id}-{cluster_id}"
+        lines.append(
+            "    .prevent_default_entity_creation("
+            f"endpoint_id={endpoint_id}, cluster_id=0x{cluster_id:04X}, "
+            f"unique_id_suffix={default_unique_id_suffix!r})"
+        )
     for attribute in project.attributes:
         lines.extend(_entity_lines(attribute))
     lines.extend(["    .add_to_registry()", ")", ""])
