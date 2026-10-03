@@ -3,6 +3,32 @@
 Standalone desktop editor for generating and validating ZHA QuirkBuilder v2 files.
 It does not depend on Zigbee Hub and does not connect to a coordinator.
 
+![ZHA Quirk Builder running on Windows](docs/images/zha-quirk-builder-windows.jpg)
+
+## Features
+
+- visual mapping of Zigbee attributes to ZHA sensors, numbers, switches, binary
+  sensors, and enum selects;
+- generation of custom clusters while preserving standard ZCL attributes;
+- reporting configuration and replacement of default ZHA entities;
+- validation against bundled, latest stable, or custom zigpy/ZHA/zha-quirks versions;
+- project import/export and standalone desktop packages for Windows, macOS, and Linux.
+
+## Home Assistant result
+
+Generated quirks can expose standard measurements and manufacturer-specific
+attributes as native ZHA entities.
+
+| Sensors | Configuration entities |
+| --- | --- |
+| ![Generated sensors in Home Assistant](docs/images/home-assistant-device.jpg) | ![Generated configuration entities in Home Assistant](docs/images/home-assistant-settings.jpg) |
+
+## Download
+
+Download the latest standalone package from
+[GitHub Releases](https://github.com/faronov/zha-quirk-builder/releases/latest).
+No separate Python installation is required.
+
 ## Development
 
 Python 3.12 or newer is required because the current ZHA and zha-quirks releases
@@ -40,4 +66,4 @@ GitHub Actions builds:
 - Linux x64 and ARM64 `.tar.gz` archives containing a standalone executable.
 
 No separate Python installation is required for packaged applications. Push a
-tag such as `v0.1.0` to create a GitHub release containing both archives.
+tag such as `v0.1.0` to create a GitHub release containing all platform archives.
