@@ -38,6 +38,13 @@ def standard_cluster_class(cluster_id: int) -> type[Cluster] | None:
     return Cluster._registry.get(cluster_id)
 
 
+def standard_cluster_choices() -> tuple[tuple[int, str], ...]:
+    return tuple(
+        (cluster_id, cluster_class.__name__)
+        for cluster_id, cluster_class in sorted(Cluster._registry.items())
+    )
+
+
 def entity_unique_id_suffix(attribute: AttributeSpec) -> str:
     return attribute.translation_key or attribute.device_class or attribute.name
 
@@ -76,13 +83,24 @@ def _entity_lines(attribute: AttributeSpec) -> list[str]:
         if argument:
             arguments.append(argument)
     if attribute.entity_kind == "sensor":
-        for name, value in (
-            ("divisor", attribute.divisor),
-            ("multiplier", attribute.multiplier),
-        ):
-            argument = _value_argument(name, value)
-            if argument:
-                arguments.append(argument)
+        if attribute.round_digits is not None:
+            value_expression = "value"
+            if attribute.multiplier is not None:
+                value_expression = f"value * {attribute.multiplier}"
+            if attribute.divisor:
+                value_expression = f"({value_expression}) / {attribute.divisor}"
+            arguments.append(
+                f"attribute_converter=lambda value: round({value_expression}, "
+                f"{attribute.round_digits})"
+            )
+        else:
+            for name, value in (
+                ("divisor", attribute.divisor),
+                ("multiplier", attribute.multiplier),
+            ):
+                argument = _value_argument(name, value)
+                if argument:
+                    arguments.append(argument)
         argument = _value_argument("state_class", attribute.state_class)
         if argument:
             arguments.append(argument)
@@ -125,6 +143,8 @@ def generate_quirk(project: QuirkProject) -> str:
         "",
         "import zigpy.types as t",
     ]
+    if any(attribute.entity_kind == "enum" for attribute in project.attributes):
+        lines.append("from enum import IntEnum")
     if grouped:
         lines.extend(
             [
@@ -149,7 +169,7 @@ def generate_quirk(project: QuirkProject) -> str:
         if attribute.entity_kind == "enum":
             enum_classes.setdefault(enum_class_identifier(attribute), attribute)
     for enum_class, attribute in enum_classes.items():
-        lines.append(f"class {enum_class}(t.{attribute.data_type}):")
+        lines.append(f"class {enum_class}(IntEnum):")
         if attribute.enum_values:
             for name, value in attribute.enum_values.items():
                 lines.append(f"    {name} = {value}")
@@ -175,14 +195,9 @@ def generate_quirk(project: QuirkProject) -> str:
             ]
         )
         for attribute in attributes:
-            attribute_type = (
-                enum_class_identifier(attribute)
-                if attribute.entity_kind == "enum"
-                else ZIGPY_TYPES[attribute.data_type]
-            )
             definition = [
                 f"id=0x{attribute.attribute_id:04X}",
-                f"type={attribute_type}",
+                f"type={ZIGPY_TYPES[attribute.data_type]}",
                 f"access={attribute.access!r}",
             ]
             if attribute.manufacturer_specific:

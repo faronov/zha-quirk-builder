@@ -49,10 +49,10 @@ def test_enum_entity_imports_with_upstream_stack() -> None:
                 name="tx_radio_power",
                 cluster_id=0x0001,
                 attribute_id=0xFF01,
-                data_type="enum8",
+                data_type="int8",
                 entity_kind="enum",
                 enum_class="TxRadioPowerEnum",
-                enum_values={"MINUS_20_DBM": 0, "PLUS_4_DBM": 1},
+                enum_values={"MINUS_20_DBM": -20, "PLUS_4_DBM": 4},
                 translation_key="tx_radio_power",
                 fallback_name="Set TX Radio Power",
             )

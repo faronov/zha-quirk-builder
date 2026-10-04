@@ -90,10 +90,10 @@ def test_enum_entity_generates_enum_class_and_builder_call() -> None:
                 name="tx_radio_power",
                 cluster_id=0x0001,
                 attribute_id=0xFF01,
-                data_type="enum8",
+                data_type="int8",
                 entity_kind="enum",
                 enum_class="TxRadioPowerEnum",
-                enum_values={"MINUS_20_DBM": 0, "PLUS_4_DBM": 1},
+                enum_values={"MINUS_20_DBM": -20, "PLUS_4_DBM": 4},
                 translation_key="tx_radio_power",
                 fallback_name="Set TX Radio Power",
             )
@@ -103,11 +103,37 @@ def test_enum_entity_generates_enum_class_and_builder_call() -> None:
     source = generate_quirk(project)
 
     ast.parse(source)
-    assert "class TxRadioPowerEnum(t.enum8):" in source
-    assert "type=TxRadioPowerEnum" in source
+    assert "from enum import IntEnum" in source
+    assert "class TxRadioPowerEnum(IntEnum):" in source
+    assert "type=t.int8s" in source
     assert ".enum(" in source
     assert "'tx_radio_power',\n            TxRadioPowerEnum," in source
     assert validate_project(project) == []
+
+
+def test_sensor_rounding_applies_after_scaling() -> None:
+    project = QuirkProject(
+        manufacturer="EfektaLab",
+        model="EFEKTA_T1_v2_LR",
+        attributes=[
+            AttributeSpec(
+                name="uptime",
+                cluster_id=0x000A,
+                attribute_id=0x0006,
+                data_type="uint32",
+                entity_kind="sensor",
+                translation_key="uptime",
+                unit="h",
+                divisor=3600,
+                round_digits=0,
+            )
+        ],
+    )
+
+    source = generate_quirk(project)
+
+    assert "attribute_converter=lambda value: round((value) / 3600, 0)" in source
+    assert "divisor=3600" not in source
 
 
 def test_custom_attributes_preserve_standard_cluster_attributes() -> None:

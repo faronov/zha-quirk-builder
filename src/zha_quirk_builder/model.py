@@ -44,6 +44,7 @@ class AttributeSpec:
     step: float | None = None
     divisor: int | None = None
     multiplier: int | None = None
+    round_digits: int | None = None
     state_class: str = ""
     enum_class: str = ""
     enum_values: dict[str, int] = field(default_factory=dict)

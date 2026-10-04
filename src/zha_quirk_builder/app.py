@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from copy import deepcopy
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -33,7 +34,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from zha_quirk_builder.generator import generate_quirk, python_identifier
+from zha_quirk_builder.generator import (
+    generate_quirk,
+    python_identifier,
+    standard_cluster_choices,
+)
 from zha_quirk_builder.model import (
     ENTITY_KINDS,
     ZIGPY_TYPES,
@@ -165,6 +170,10 @@ def parse_optional_float(value: str) -> float | None:
     return float(value.strip()) if value.strip() else None
 
 
+def parse_cluster_id(value: str) -> int:
+    return parse_int(value.split("—", 1)[0])
+
+
 def parse_enum_values(value: str) -> dict[str, int]:
     values: dict[str, int] = {}
     for item in value.split(","):
@@ -216,7 +225,25 @@ class AttributeDialog(QDialog):
         layout.addWidget(scroll_area)
 
         self.name = QLineEdit(source.name)
-        self.cluster_id = QLineEdit(f"0x{source.cluster_id:04X}")
+        self.cluster_id = QComboBox()
+        self.cluster_id.setEditable(True)
+        self.cluster_id.setInsertPolicy(QComboBox.NoInsert)
+        self.cluster_id.addItems(
+            f"0x{cluster_id:04X} — {name}" for cluster_id, name in standard_cluster_choices()
+        )
+        cluster_prefix = f"0x{source.cluster_id:04X}"
+        cluster_index = next(
+            (
+                index
+                for index in range(self.cluster_id.count())
+                if self.cluster_id.itemText(index).startswith(cluster_prefix)
+            ),
+            -1,
+        )
+        if cluster_index >= 0:
+            self.cluster_id.setCurrentIndex(cluster_index)
+        else:
+            self.cluster_id.setCurrentText(cluster_prefix)
         self.attribute_id = QLineEdit(f"0x{source.attribute_id:04X}")
         self.endpoint_id = QSpinBox()
         self.endpoint_id.setRange(1, 240)
@@ -248,6 +275,10 @@ class AttributeDialog(QDialog):
         self.step = QLineEdit("" if source.step is None else str(source.step))
         self.divisor = QLineEdit("" if source.divisor is None else str(source.divisor))
         self.multiplier = QLineEdit("" if source.multiplier is None else str(source.multiplier))
+        self.round_digits = QLineEdit(
+            "" if source.round_digits is None else str(source.round_digits)
+        )
+        self.round_digits.setPlaceholderText("0")
         self.state_class = QComboBox()
         self.state_class.addItems(("", "measurement", "total", "total_increasing"))
         self.state_class.setCurrentText(source.state_class)
@@ -288,6 +319,7 @@ class AttributeDialog(QDialog):
             ("Step", self.step),
             ("Divisor", self.divisor),
             ("Multiplier", self.multiplier),
+            ("Round decimal places", self.round_digits),
             ("State class", self.state_class),
             ("Enum class", self.enum_class),
             ("Enum values", self.enum_values),
@@ -312,8 +344,7 @@ class AttributeDialog(QDialog):
         is_enum = entity_kind == "enum"
         self.enum_class.setEnabled(is_enum)
         self.enum_values.setEnabled(is_enum)
-        if is_enum and self.data_type.currentText() not in {"enum8", "enum16"}:
-            self.data_type.setCurrentText("enum8")
+        self.round_digits.setEnabled(entity_kind == "sensor")
 
     def _accept_if_valid(self) -> None:
         try:
@@ -330,7 +361,7 @@ class AttributeDialog(QDialog):
         entity_kind = self.entity_kind.currentText()
         return AttributeSpec(
             name=name,
-            cluster_id=parse_int(self.cluster_id.text()),
+            cluster_id=parse_cluster_id(self.cluster_id.currentText()),
             attribute_id=parse_int(self.attribute_id.text()),
             endpoint_id=self.endpoint_id.value(),
             data_type=self.data_type.currentText(),
@@ -349,6 +380,7 @@ class AttributeDialog(QDialog):
             step=parse_optional_float(self.step.text()),
             divisor=parse_optional_int(self.divisor.text()),
             multiplier=parse_optional_int(self.multiplier.text()),
+            round_digits=parse_optional_int(self.round_digits.text()),
             state_class=self.state_class.currentText(),
             enum_class=self.enum_class.text().strip() if entity_kind == "enum" else "",
             enum_values=parse_enum_values(self.enum_values.text()) if entity_kind == "enum" else {},
@@ -441,11 +473,14 @@ class MainWindow(QMainWindow):
         add_button.clicked.connect(self._add_attribute)
         edit_button = QPushButton("Edit")
         edit_button.clicked.connect(self._edit_attribute)
+        copy_button = QPushButton("Copy")
+        copy_button.clicked.connect(self._copy_attribute)
         remove_button = QPushButton("Remove")
         remove_button.setObjectName("danger")
         remove_button.clicked.connect(self._remove_attribute)
         attribute_buttons.addWidget(add_button)
         attribute_buttons.addWidget(edit_button)
+        attribute_buttons.addWidget(copy_button)
         attribute_buttons.addWidget(remove_button)
         attribute_buttons.addStretch()
         layout.addLayout(attribute_buttons)
@@ -565,6 +600,18 @@ class MainWindow(QMainWindow):
             self.project.attributes[row] = dialog.value()
             self._refresh_table()
             self.table.selectRow(row)
+            self._generate()
+
+    def _copy_attribute(self) -> None:
+        row = self._selected_row()
+        if row is None:
+            QMessageBox.information(self, "Copy mapping", "Select an attribute mapping first.")
+            return
+        dialog = AttributeDialog(self, deepcopy(self.project.attributes[row]))
+        if dialog.exec() == QDialog.Accepted:
+            self.project.attributes.insert(row + 1, dialog.value())
+            self._refresh_table()
+            self.table.selectRow(row + 1)
             self._generate()
 
     def _remove_attribute(self) -> None:

@@ -18,6 +18,19 @@ from zha_quirk_builder.generator import (
 )
 from zha_quirk_builder.model import ENTITY_KINDS, ZIGPY_TYPES, QuirkProject
 
+ENUM_DATA_TYPES = {
+    "bitmap8": (0, 0xFF),
+    "bitmap16": (0, 0xFFFF),
+    "enum8": (0, 0xFF),
+    "enum16": (0, 0xFFFF),
+    "uint8": (0, 0xFF),
+    "uint16": (0, 0xFFFF),
+    "uint32": (0, 0xFFFFFFFF),
+    "int8": (-0x80, 0x7F),
+    "int16": (-0x8000, 0x7FFF),
+    "int32": (-0x80000000, 0x7FFFFFFF),
+}
+
 
 @dataclass(frozen=True, slots=True)
 class ValidationIssue:
@@ -123,27 +136,37 @@ def validate_project(project: QuirkProject) -> list[ValidationIssue]:
                 )
             elif attribute.min_value >= attribute.max_value:
                 issues.append(ValidationIssue("error", f"{prefix}: minimum must be below maximum."))
+        if attribute.round_digits is not None:
+            if attribute.entity_kind != "sensor":
+                issues.append(
+                    ValidationIssue("error", f"{prefix}: rounding is only supported for sensors.")
+                )
+            elif not 0 <= attribute.round_digits <= 15:
+                issues.append(
+                    ValidationIssue("error", f"{prefix}: rounding digits must be 0..15.")
+                )
         if attribute.entity_kind == "enum":
             enum_class = enum_class_identifier(attribute)
             if not enum_class.isidentifier() or keyword.iskeyword(enum_class):
                 issues.append(ValidationIssue("error", f"{prefix}: invalid enum class name."))
-            if attribute.data_type not in {"enum8", "enum16"}:
+            if attribute.data_type not in ENUM_DATA_TYPES:
                 issues.append(
-                    ValidationIssue("error", f"{prefix}: Enum requires enum8 or enum16 datatype.")
+                    ValidationIssue("error", f"{prefix}: Enum requires an integer datatype.")
                 )
             if not attribute.enum_values:
                 issues.append(ValidationIssue("error", f"{prefix}: Enum requires values."))
-            maximum = 0xFF if attribute.data_type == "enum8" else 0xFFFF
+            minimum, maximum = ENUM_DATA_TYPES.get(attribute.data_type, (0, 0))
             for name, value in attribute.enum_values.items():
                 if not name.isidentifier() or keyword.iskeyword(name):
                     issues.append(
                         ValidationIssue("error", f"{prefix}: invalid enum value name {name!r}.")
                     )
-                if not isinstance(value, int) or not 0 <= value <= maximum:
+                if not isinstance(value, int) or not minimum <= value <= maximum:
                     issues.append(
                         ValidationIssue(
                             "error",
-                            f"{prefix}: enum value {name!r} must be 0..{maximum}.",
+                            f"{prefix}: enum value {name!r} must be "
+                            f"{minimum}..{maximum}.",
                         )
                     )
             enum_definition = (attribute.data_type, attribute.enum_values)

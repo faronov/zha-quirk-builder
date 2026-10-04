@@ -9,6 +9,8 @@ It does not depend on Zigbee Hub and does not connect to a coordinator.
 
 - visual mapping of Zigbee attributes to ZHA sensors, numbers, switches, binary
   sensors, and enum selects;
+- searchable standard-cluster names alongside numeric Zigbee cluster IDs;
+- attribute duplication and optional rounded sensor value conversion after scaling;
 - generation of custom clusters while preserving standard ZCL attributes;
 - reporting configuration and replacement of default ZHA entities;
 - validation against bundled, latest stable, or custom zigpy/ZHA/zha-quirks versions;
