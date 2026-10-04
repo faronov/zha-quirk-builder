@@ -29,6 +29,7 @@ class AttributeSpec:
     attribute_id: int
     data_type: str
     endpoint_id: int = 1
+    cluster_type: str = "server"
     access: str = "rw"
     manufacturer_specific: bool = True
     manufacturer_code: int | None = None

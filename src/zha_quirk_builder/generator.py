@@ -20,11 +20,17 @@ def python_identifier(value: str, fallback: str = "attribute") -> str:
     return identifier
 
 
-def class_identifier(project: QuirkProject, cluster_id: int, endpoint_id: int) -> str:
+def class_identifier(
+    project: QuirkProject,
+    cluster_id: int,
+    endpoint_id: int,
+    cluster_type: str = "server",
+) -> str:
     model = re.sub(r"[^A-Za-z0-9]+", " ", project.model).title().replace(" ", "")
     if not model or model[0].isdigit():
         model = f"Device{model}"
-    return f"{model}Cluster{cluster_id:04X}Endpoint{endpoint_id}"
+    direction = "Client" if cluster_type == "client" else ""
+    return f"{model}Cluster{cluster_id:04X}Endpoint{endpoint_id}{direction}"
 
 
 def enum_class_identifier(attribute: AttributeSpec) -> str:
@@ -62,9 +68,11 @@ def _entity_lines(attribute: AttributeSpec) -> list[str]:
     arguments.extend(
         [
             f"cluster_id=0x{attribute.cluster_id:04X}",
-            f"endpoint_id={attribute.endpoint_id}",
         ]
     )
+    if attribute.cluster_type == "client":
+        arguments.append("cluster_type=ClusterType.Client")
+    arguments.append(f"endpoint_id={attribute.endpoint_id}")
     for name, value in (
         ("translation_key", attribute.translation_key),
         ("fallback_name", attribute.fallback_name or attribute.name.replace("_", " ").title()),
@@ -133,10 +141,21 @@ def _entity_lines(attribute: AttributeSpec) -> list[str]:
 
 
 def generate_quirk(project: QuirkProject) -> str:
-    grouped: dict[tuple[int, int], list[AttributeSpec]] = defaultdict(list)
+    grouped: dict[tuple[int, int, str], list[AttributeSpec]] = defaultdict(list)
     for attribute in project.attributes:
         if attribute.define_attribute:
-            grouped[(attribute.cluster_id, attribute.endpoint_id)].append(attribute)
+            grouped[
+                (attribute.cluster_id, attribute.endpoint_id, attribute.cluster_type)
+            ].append(attribute)
+    direct_client_replacements = {
+        (attribute.cluster_id, attribute.endpoint_id)
+        for attribute in project.attributes
+        if (
+            not attribute.define_attribute
+            and attribute.cluster_type == "client"
+            and standard_cluster_class(attribute.cluster_id) is not None
+        )
+    }
 
     lines = [
         f'"""ZHA quirk for {project.manufacturer} {project.model}."""',
@@ -145,6 +164,17 @@ def generate_quirk(project: QuirkProject) -> str:
     ]
     if any(attribute.entity_kind == "enum" for attribute in project.attributes):
         lines.append("from enum import IntEnum")
+    if any(attribute.cluster_type == "client" for attribute in project.attributes):
+        lines.append("from zigpy.zcl import ClusterType")
+    cluster_imports: dict[str, set[str]] = defaultdict(set)
+    for cluster_id, _endpoint_id, _cluster_type in grouped:
+        cluster_class = standard_cluster_class(cluster_id)
+        if cluster_class is not None:
+            cluster_imports[cluster_class.__module__].add(cluster_class.__name__)
+    for cluster_id, _endpoint_id in direct_client_replacements:
+        cluster_class = standard_cluster_class(cluster_id)
+        if cluster_class is not None:
+            cluster_imports[cluster_class.__module__].add(cluster_class.__name__)
     if grouped:
         lines.extend(
             [
@@ -152,13 +182,8 @@ def generate_quirk(project: QuirkProject) -> str:
                 "from zigpy.zcl.foundation import BaseAttributeDefs, ZCLAttributeDef",
             ]
         )
-        cluster_imports: dict[str, set[str]] = defaultdict(set)
-        for cluster_id, _endpoint_id in grouped:
-            cluster_class = standard_cluster_class(cluster_id)
-            if cluster_class is not None:
-                cluster_imports[cluster_class.__module__].add(cluster_class.__name__)
-        for module, class_names in sorted(cluster_imports.items()):
-            lines.append(f"from {module} import {', '.join(sorted(class_names))}")
+    for module, class_names in sorted(cluster_imports.items()):
+        lines.append(f"from {module} import {', '.join(sorted(class_names))}")
     builder_imports = ["QuirkBuilder"]
     if any(attribute.reporting_min_interval is not None for attribute in project.attributes):
         builder_imports.append("ReportingConfig")
@@ -177,8 +202,8 @@ def generate_quirk(project: QuirkProject) -> str:
             lines.append("    pass")
         lines.append("")
 
-    for (cluster_id, endpoint_id), attributes in sorted(grouped.items()):
-        class_name = class_identifier(project, cluster_id, endpoint_id)
+    for (cluster_id, endpoint_id, cluster_type), attributes in sorted(grouped.items()):
+        class_name = class_identifier(project, cluster_id, endpoint_id, cluster_type)
         cluster_class = standard_cluster_class(cluster_id)
         base_classes = (
             f"CustomCluster, {cluster_class.__name__}" if cluster_class else "CustomCluster"
@@ -216,22 +241,35 @@ def generate_quirk(project: QuirkProject) -> str:
         )
         lines.append(f"    .friendly_name({', '.join(arguments)})")
 
-    for cluster_id, endpoint_id in sorted(grouped):
+    for cluster_id, endpoint_id, cluster_type in sorted(grouped):
+        arguments = [
+            class_identifier(project, cluster_id, endpoint_id, cluster_type),
+            f"endpoint_id={endpoint_id}",
+        ]
+        if cluster_type == "client":
+            arguments.append("cluster_type=ClusterType.Client")
+        lines.append(f"    .replaces({', '.join(arguments)})")
+    for cluster_id, endpoint_id in sorted(direct_client_replacements):
+        cluster_class = standard_cluster_class(cluster_id)
         lines.append(
-            f"    .replaces({class_identifier(project, cluster_id, endpoint_id)}, "
-            f"endpoint_id={endpoint_id})"
+            f"    .replaces({cluster_class.__name__}, endpoint_id={endpoint_id}, "
+            "cluster_type=ClusterType.Client)"
         )
     replaced_default_entities = {
-        (attribute.endpoint_id, attribute.cluster_id)
+        (attribute.endpoint_id, attribute.cluster_id, attribute.cluster_type)
         for attribute in project.attributes
         if attribute.replace_default_entity
     }
-    for endpoint_id, cluster_id in sorted(replaced_default_entities):
+    for endpoint_id, cluster_id, cluster_type in sorted(replaced_default_entities):
         default_unique_id_suffix = f"{endpoint_id}-{cluster_id}"
+        cluster_type_argument = (
+            ", cluster_type=ClusterType.Client" if cluster_type == "client" else ""
+        )
         lines.append(
             "    .prevent_default_entity_creation("
             f"endpoint_id={endpoint_id}, cluster_id=0x{cluster_id:04X}, "
-            f"unique_id_suffix={default_unique_id_suffix!r})"
+            f"unique_id_suffix={default_unique_id_suffix!r}"
+            f"{cluster_type_argument})"
         )
     for attribute in project.attributes:
         lines.extend(_entity_lines(attribute))

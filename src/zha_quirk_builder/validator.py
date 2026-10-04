@@ -47,8 +47,8 @@ def validate_project(project: QuirkProject) -> list[ValidationIssue]:
     if not project.attributes:
         issues.append(ValidationIssue("error", "Add at least one attribute."))
 
-    seen: set[tuple[int, int, int]] = set()
-    names: set[tuple[int, int, str]] = set()
+    seen: set[tuple[int, int, str, int]] = set()
+    names: set[tuple[int, int, str, str]] = set()
     enum_classes: dict[str, tuple[str, dict[str, int]]] = {}
     entity_unique_ids: set[tuple[int, str]] = set()
     for index, attribute in enumerate(project.attributes, 1):
@@ -59,11 +59,21 @@ def validate_project(project: QuirkProject) -> list[ValidationIssue]:
                     "error", f"{prefix}: name must be a valid snake_case Python identifier."
                 )
             )
-        key = (attribute.endpoint_id, attribute.cluster_id, attribute.attribute_id)
+        key = (
+            attribute.endpoint_id,
+            attribute.cluster_id,
+            attribute.cluster_type,
+            attribute.attribute_id,
+        )
         if key in seen:
             issues.append(ValidationIssue("error", f"{prefix}: duplicate endpoint/cluster/ID."))
         seen.add(key)
-        name_key = (attribute.endpoint_id, attribute.cluster_id, attribute.name)
+        name_key = (
+            attribute.endpoint_id,
+            attribute.cluster_id,
+            attribute.cluster_type,
+            attribute.name,
+        )
         if name_key in names:
             issues.append(ValidationIssue("error", f"{prefix}: duplicate attribute name."))
         names.add(name_key)
@@ -82,6 +92,8 @@ def validate_project(project: QuirkProject) -> list[ValidationIssue]:
             issues.append(ValidationIssue("error", f"{prefix}: unsupported zigpy datatype."))
         if attribute.entity_kind not in ENTITY_KINDS:
             issues.append(ValidationIssue("error", f"{prefix}: unsupported entity kind."))
+        if attribute.cluster_type not in {"server", "client"}:
+            issues.append(ValidationIssue("error", f"{prefix}: unsupported cluster direction."))
         cluster_class = standard_cluster_class(attribute.cluster_id)
         if not attribute.define_attribute and (
             cluster_class is None or attribute.name not in cluster_class.attributes_by_name

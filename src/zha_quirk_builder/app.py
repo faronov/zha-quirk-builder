@@ -248,6 +248,12 @@ class AttributeDialog(QDialog):
         self.endpoint_id = QSpinBox()
         self.endpoint_id.setRange(1, 240)
         self.endpoint_id.setValue(source.endpoint_id)
+        self.cluster_type = QComboBox()
+        self.cluster_type.addItem("Input (server)", "server")
+        self.cluster_type.addItem("Output (client)", "client")
+        self.cluster_type.setCurrentIndex(
+            max(0, self.cluster_type.findData(source.cluster_type))
+        )
         self.data_type = QComboBox()
         self.data_type.addItems(ZIGPY_TYPES)
         self.data_type.setCurrentText(source.data_type)
@@ -303,6 +309,7 @@ class AttributeDialog(QDialog):
             ("Cluster ID", self.cluster_id),
             ("Attribute ID", self.attribute_id),
             ("Endpoint", self.endpoint_id),
+            ("Direction", self.cluster_type),
             ("zigpy datatype", self.data_type),
             ("Access", self.access),
             ("Flags", self.manufacturer_specific),
@@ -364,6 +371,7 @@ class AttributeDialog(QDialog):
             cluster_id=parse_cluster_id(self.cluster_id.currentText()),
             attribute_id=parse_int(self.attribute_id.text()),
             endpoint_id=self.endpoint_id.value(),
+            cluster_type=self.cluster_type.currentData(),
             data_type=self.data_type.currentText(),
             access=self.access.currentText(),
             manufacturer_specific=self.manufacturer_specific.isChecked(),
@@ -455,12 +463,22 @@ class MainWindow(QMainWindow):
         mapping_label = QLabel("ATTRIBUTE MAPPINGS")
         mapping_label.setObjectName("eyebrow")
         layout.addWidget(mapping_label)
-        self.table = QTableWidget(0, 8)
+        self.table = QTableWidget(0, 9)
         self.table.setHorizontalHeaderLabels(
-            ("Name", "Endpoint", "Cluster", "Attribute", "Type", "Entity", "Reporting", "Label")
+            (
+                "Name",
+                "Endpoint",
+                "Direction",
+                "Cluster",
+                "Attribute",
+                "Type",
+                "Entity",
+                "Reporting",
+                "Label",
+            )
         )
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(8, QHeaderView.Stretch)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
@@ -563,6 +581,7 @@ class MainWindow(QMainWindow):
             values = (
                 attribute.name,
                 str(attribute.endpoint_id),
+                "Input" if attribute.cluster_type == "server" else "Output",
                 f"0x{attribute.cluster_id:04X}",
                 f"0x{attribute.attribute_id:04X}",
                 attribute.data_type,

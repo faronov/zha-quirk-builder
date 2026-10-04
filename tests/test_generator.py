@@ -136,6 +136,55 @@ def test_sensor_rounding_applies_after_scaling() -> None:
     assert "divisor=3600" not in source
 
 
+def test_output_cluster_generates_client_cluster_type() -> None:
+    project = QuirkProject(
+        manufacturer="Example",
+        model="ClientCluster",
+        attributes=[
+            AttributeSpec(
+                name="on_off",
+                cluster_id=0x0006,
+                attribute_id=0x0000,
+                data_type="bool",
+                endpoint_id=2,
+                cluster_type="client",
+                define_attribute=False,
+                manufacturer_specific=False,
+                entity_kind="binary_sensor",
+                translation_key="remote_on_off",
+                fallback_name="Opening",
+                device_class="opening",
+            )
+        ],
+    )
+
+    source = generate_quirk(project)
+
+    ast.parse(source)
+    assert "from zigpy.zcl import ClusterType" in source
+    assert (
+        ".replaces(OnOff, endpoint_id=2, cluster_type=ClusterType.Client)" in source
+    )
+    assert ".binary_sensor(" in source
+    assert "cluster_type=ClusterType.Client" in source
+    assert "fallback_name='Opening'" in source
+    assert "device_class='opening'" in source
+    assert validate_project(project) == []
+
+
+def test_old_project_json_defaults_to_input_cluster() -> None:
+    attribute = AttributeSpec.from_dict(
+        {
+            "name": "measured_value",
+            "cluster_id": 0x0402,
+            "attribute_id": 0,
+            "data_type": "int16",
+        }
+    )
+
+    assert attribute.cluster_type == "server"
+
+
 def test_custom_attributes_preserve_standard_cluster_attributes() -> None:
     project = QuirkProject(
         manufacturer="EfektaLab",
