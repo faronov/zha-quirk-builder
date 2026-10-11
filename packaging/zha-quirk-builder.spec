@@ -82,7 +82,7 @@ elif sys.platform == "darwin":
         bundle_identifier="io.github.faronov.zha-quirk-builder",
         info_plist={
             "CFBundleDisplayName": "ZHA Quirk Builder",
-            "CFBundleShortVersionString": "0.1.0",
+            "CFBundleShortVersionString": "0.1.1",
             "NSHighResolutionCapable": True,
         },
     )

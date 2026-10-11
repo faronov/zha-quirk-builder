@@ -16,6 +16,21 @@ It does not depend on Zigbee Hub and does not connect to a coordinator.
 - validation against bundled, latest stable, or custom zigpy/ZHA/zha-quirks versions;
 - project import/export and standalone desktop packages for Windows, macOS, and Linux.
 
+If **Translation key** is blank, the generator uses the Python attribute name
+when a key is required, including for enum selects and switches. An explicit key
+is preserved. Sensors, numbers, and binary sensors with a device class can omit
+the key.
+
+Generation validates numeric limits, scaling, entity classes, and enum names.
+Export runs an upstream import check using the selected compatibility profile;
+invalid projects are not exported. Warnings remain visible after export.
+
+**Fractional number writes:** ZHA 2.2.0 and 2.3.0 truncate writes to floating-point
+number attributes and can lose precision when writing scaled integers. The builder
+warns about these mappings without changing their ZCL datatype or adding an
+unverified workaround. Successful import validation does not test device reads,
+writes, or reporting; verify fractional settings with your ZHA version and device.
+
 ## Home Assistant result
 
 Generated quirks can expose standard measurements and manufacturer-specific
@@ -56,8 +71,11 @@ Use the profile selector above the generated Python preview to choose:
 - **Custom versions** to enter an exact three-version compatibility matrix.
 
 Non-bundled profiles are installed into separate cached environments with `uv`.
-Changing a profile never modifies the application environment. The first check
-downloads the selected packages; subsequent checks reuse that profile cache.
+Changing a profile never modifies the application environment. **Latest stable**
+checks for current, mutually compatible non-prerelease packages on each validation
+and reports the resolved versions. It requires access to the package index.
+**Custom versions** reuse their cached exact-version environment after the first
+installation.
 
 ## Desktop packages
 

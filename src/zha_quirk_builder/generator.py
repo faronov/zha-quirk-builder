@@ -8,6 +8,8 @@ from zigpy.zcl import Cluster
 
 from zha_quirk_builder.model import ZIGPY_TYPES, AttributeSpec, QuirkProject
 
+DEVICE_CLASS_ENTITY_KINDS = frozenset({"sensor", "number", "binary_sensor"})
+
 
 def python_identifier(value: str, fallback: str = "attribute") -> str:
     identifier = re.sub(r"\W+", "_", value.strip().lower()).strip("_")
@@ -51,8 +53,46 @@ def standard_cluster_choices() -> tuple[tuple[int, str], ...]:
     )
 
 
+def entity_translation_key(attribute: AttributeSpec) -> str:
+    if attribute.translation_key:
+        return attribute.translation_key
+    if attribute.entity_kind in DEVICE_CLASS_ENTITY_KINDS and attribute.device_class:
+        return ""
+    return attribute.name
+
+
 def entity_unique_id_suffix(attribute: AttributeSpec) -> str:
-    return attribute.translation_key or attribute.device_class or attribute.name
+    return entity_translation_key(attribute) or attribute.device_class or attribute.name
+
+
+def number_multiplier(attribute: AttributeSpec) -> float | int:
+    multiplier = attribute.multiplier if attribute.multiplier is not None else 1
+    return multiplier / attribute.divisor if attribute.divisor is not None else multiplier
+
+
+def reserved_enum_names(project: QuirkProject) -> set[str]:
+    names = {
+        "t",
+        "IntEnum",
+        "CustomCluster",
+        "BaseAttributeDefs",
+        "ZCLAttributeDef",
+        "QuirkBuilder",
+        "ReportingConfig",
+        "ClusterType",
+        "round",
+    }
+    for attribute in project.attributes:
+        cluster_class = standard_cluster_class(attribute.cluster_id)
+        if cluster_class is not None:
+            names.add(cluster_class.__name__)
+        if attribute.define_attribute:
+            names.add(
+                class_identifier(
+                    project, attribute.cluster_id, attribute.endpoint_id, attribute.cluster_type
+                )
+            )
+    return names
 
 
 def _value_argument(name: str, value: object | None) -> str | None:
@@ -74,7 +114,7 @@ def _entity_lines(attribute: AttributeSpec) -> list[str]:
         arguments.append("cluster_type=ClusterType.Client")
     arguments.append(f"endpoint_id={attribute.endpoint_id}")
     for name, value in (
-        ("translation_key", attribute.translation_key),
+        ("translation_key", entity_translation_key(attribute)),
         ("fallback_name", attribute.fallback_name or attribute.name.replace("_", " ").title()),
         ("unique_id_suffix", entity_unique_id_suffix(attribute)),
     ):
@@ -82,7 +122,7 @@ def _entity_lines(attribute: AttributeSpec) -> list[str]:
         if argument:
             arguments.append(argument)
 
-    if attribute.entity_kind in {"sensor", "number", "binary_sensor"}:
+    if attribute.entity_kind in DEVICE_CLASS_ENTITY_KINDS:
         argument = _value_argument("device_class", attribute.device_class)
         if argument:
             arguments.append(argument)
@@ -95,7 +135,7 @@ def _entity_lines(attribute: AttributeSpec) -> list[str]:
             value_expression = "value"
             if attribute.multiplier is not None:
                 value_expression = f"value * {attribute.multiplier}"
-            if attribute.divisor:
+            if attribute.divisor is not None:
                 value_expression = f"({value_expression}) / {attribute.divisor}"
             arguments.append(
                 f"attribute_converter=lambda value: round({value_expression}, "
@@ -113,9 +153,7 @@ def _entity_lines(attribute: AttributeSpec) -> list[str]:
         if argument:
             arguments.append(argument)
     if attribute.entity_kind == "number":
-        effective_multiplier: float | int | None = attribute.multiplier
-        if attribute.divisor:
-            effective_multiplier = (attribute.multiplier or 1) / attribute.divisor
+        effective_multiplier = number_multiplier(attribute)
         argument = _value_argument("multiplier", effective_multiplier)
         if argument and effective_multiplier != 1:
             arguments.append(argument)
@@ -144,9 +182,9 @@ def generate_quirk(project: QuirkProject) -> str:
     grouped: dict[tuple[int, int, str], list[AttributeSpec]] = defaultdict(list)
     for attribute in project.attributes:
         if attribute.define_attribute:
-            grouped[
-                (attribute.cluster_id, attribute.endpoint_id, attribute.cluster_type)
-            ].append(attribute)
+            grouped[(attribute.cluster_id, attribute.endpoint_id, attribute.cluster_type)].append(
+                attribute
+            )
     direct_client_replacements = {
         (attribute.cluster_id, attribute.endpoint_id)
         for attribute in project.attributes

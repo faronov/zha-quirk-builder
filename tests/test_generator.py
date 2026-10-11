@@ -1,7 +1,9 @@
 import ast
 
+import pytest
+
 from zha_quirk_builder.generator import generate_quirk, python_identifier
-from zha_quirk_builder.model import AttributeSpec, QuirkProject, efekta_sample
+from zha_quirk_builder.model import ENTITY_KINDS, AttributeSpec, QuirkProject, efekta_sample
 from zha_quirk_builder.validator import validate_project
 
 
@@ -11,8 +13,7 @@ def test_efekta_sample_generates_valid_quirk_v2_python() -> None:
     ast.parse(source)
     assert "QuirkBuilder('EFEKTA', 'EFEKTA_iAQ3')" in source
     assert (
-        "class EfektaIaq3Cluster040DEndpoint1("
-        "CustomCluster, CarbonDioxideConcentration):" in source
+        "class EfektaIaq3Cluster040DEndpoint1(CustomCluster, CarbonDioxideConcentration):" in source
     )
     assert "class AttributeDefs(CarbonDioxideConcentration.AttributeDefs):" in source
     assert ".replaces(EfektaIaq3Cluster040DEndpoint1, endpoint_id=1)" in source
@@ -35,7 +36,10 @@ def test_efekta_sample_generates_valid_quirk_v2_python() -> None:
 
 
 def test_efekta_sample_passes_structural_validation() -> None:
-    assert validate_project(efekta_sample()) == []
+    issues = validate_project(efekta_sample())
+
+    assert not any(issue.severity == "error" for issue in issues)
+    assert any("fractional Number writes" in issue.message for issue in issues)
 
 
 def test_python_identifier_normalizes_unsafe_names() -> None:
@@ -111,6 +115,78 @@ def test_enum_entity_generates_enum_class_and_builder_call() -> None:
     assert validate_project(project) == []
 
 
+@pytest.mark.parametrize("entity_kind", ENTITY_KINDS)
+@pytest.mark.parametrize(
+    ("translation_key", "expected_key"),
+    [("", "custom_value"), ("display_setting", "display_setting")],
+)
+def test_required_translation_key_is_generated_or_preserved(
+    entity_kind: str, translation_key: str, expected_key: str
+) -> None:
+    attribute = AttributeSpec(
+        name="custom_value",
+        cluster_id=0xFC00,
+        attribute_id=0x0001,
+        data_type="uint8",
+        entity_kind=entity_kind,
+        translation_key=translation_key,
+        min_value=0,
+        max_value=100,
+        enum_values={"OFF": 0, "ON": 1},
+    )
+    project = QuirkProject(manufacturer="Example", model="TranslationKeys", attributes=[attribute])
+
+    source = generate_quirk(project)
+
+    assert f"translation_key={expected_key!r}" in source
+    assert f"unique_id_suffix={expected_key!r}" in source
+    assert attribute.translation_key == translation_key
+    assert validate_project(project) == []
+
+
+@pytest.mark.parametrize(
+    ("entity_kind", "device_class", "expected_key", "expected_suffix"),
+    [
+        ("sensor", "temperature", "", "temperature"),
+        ("number", "temperature", "", "temperature"),
+        ("binary_sensor", "opening", "", "opening"),
+        ("enum", "temperature", "custom_value", "custom_value"),
+        ("switch", "temperature", "custom_value", "custom_value"),
+    ],
+)
+def test_device_class_only_replaces_translation_key_when_supported(
+    entity_kind: str, device_class: str, expected_key: str, expected_suffix: str
+) -> None:
+    project = QuirkProject(
+        manufacturer="Example",
+        model="DeviceClasses",
+        attributes=[
+            AttributeSpec(
+                name="custom_value",
+                cluster_id=0xFC00,
+                attribute_id=0x0001,
+                data_type="uint8",
+                entity_kind=entity_kind,
+                device_class=device_class,
+                min_value=0,
+                max_value=100,
+                enum_values={"OFF": 0, "ON": 1},
+            )
+        ],
+    )
+
+    source = generate_quirk(project)
+
+    if expected_key:
+        assert f"translation_key={expected_key!r}" in source
+        assert "device_class=" not in source
+    else:
+        assert "translation_key=" not in source
+        assert f"device_class={device_class!r}" in source
+    assert f"unique_id_suffix={expected_suffix!r}" in source
+    assert validate_project(project) == []
+
+
 def test_sensor_rounding_applies_after_scaling() -> None:
     project = QuirkProject(
         manufacturer="EfektaLab",
@@ -162,9 +238,7 @@ def test_output_cluster_generates_client_cluster_type() -> None:
 
     ast.parse(source)
     assert "from zigpy.zcl import ClusterType" in source
-    assert (
-        ".replaces(OnOff, endpoint_id=2, cluster_type=ClusterType.Client)" in source
-    )
+    assert ".replaces(OnOff, endpoint_id=2, cluster_type=ClusterType.Client)" in source
     assert ".binary_sensor(" in source
     assert "cluster_type=ClusterType.Client" in source
     assert "fallback_name='Opening'" in source

@@ -22,24 +22,24 @@ class CompatibilityProfile:
     zha: str
     zha_quirks: str
     bundled: bool = False
+    latest: bool = False
 
     @property
     def label(self) -> str:
         if self.bundled:
             return f"{self.name} · versions packaged with the app"
-        return (
-            f"{self.name} · zigpy {self.zigpy} / ZHA {self.zha} / "
-            f"quirks {self.zha_quirks}"
-        )
+        if self.latest:
+            return f"{self.name} · resolve current stable versions"
+        return f"{self.name} · zigpy {self.zigpy} / ZHA {self.zha} / quirks {self.zha_quirks}"
 
     @property
     def key(self) -> str:
-        versions = f"{self.zigpy}:{self.zha}:{self.zha_quirks}"
+        versions = "latest" if self.latest else f"{self.zigpy}:{self.zha}:{self.zha_quirks}"
         return sha256(versions.encode()).hexdigest()[:12]
 
 
 BUNDLED_PROFILE = CompatibilityProfile("Bundled", "", "", "", bundled=True)
-LATEST_PROFILE = CompatibilityProfile("Latest stable", "2.1.0", "2.2.1", "2.2.1")
+LATEST_PROFILE = CompatibilityProfile("Latest stable", "", "", "", latest=True)
 
 
 def cache_root() -> Path:
@@ -101,7 +101,7 @@ def ensure_profile(profile: CompatibilityProfile, timeout: int = 600) -> Path:
         "zha": profile.zha,
         "zha-quirks": profile.zha_quirks,
     }
-    if python.is_file() and marker.is_file():
+    if not profile.latest and python.is_file() and marker.is_file():
         try:
             if json.loads(marker.read_text(encoding="utf-8")) == expected:
                 return python
@@ -110,16 +110,17 @@ def ensure_profile(profile: CompatibilityProfile, timeout: int = 600) -> Path:
 
     environment.parent.mkdir(parents=True, exist_ok=True)
     uv_binary = str(_uv_binary())
-    create = subprocess.run(
-        [uv_binary, "venv", "--clear", "--python", "3.12", str(environment)],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-    )
-    if create.returncode:
-        detail = create.stderr.strip() or create.stdout.strip()
-        raise RuntimeError(f"Could not create compatibility environment: {detail}")
+    if not profile.latest or not python.is_file():
+        create = subprocess.run(
+            [uv_binary, "venv", "--clear", "--python", "3.12", str(environment)],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        if create.returncode:
+            detail = create.stderr.strip() or create.stdout.strip()
+            raise RuntimeError(f"Could not create compatibility environment: {detail}")
 
     install_command = [
         uv_binary,
@@ -130,13 +131,16 @@ def ensure_profile(profile: CompatibilityProfile, timeout: int = 600) -> Path:
     ]
     if package_index := _package_index():
         install_command.extend(("--default-index", package_index))
-    install_command.extend(
-        (
-            f"zigpy=={profile.zigpy}",
-            f"zha=={profile.zha}",
-            f"zha-quirks=={profile.zha_quirks}",
+    if profile.latest:
+        install_command.extend(("--upgrade", "--prerelease=disallow", "zigpy", "zha", "zha-quirks"))
+    else:
+        install_command.extend(
+            (
+                f"zigpy=={profile.zigpy}",
+                f"zha=={profile.zha}",
+                f"zha-quirks=={profile.zha_quirks}",
+            )
         )
-    )
     install = subprocess.run(
         install_command,
         capture_output=True,
@@ -147,7 +151,8 @@ def ensure_profile(profile: CompatibilityProfile, timeout: int = 600) -> Path:
     if install.returncode:
         detail = install.stderr.strip() or install.stdout.strip()
         raise RuntimeError(f"Could not install compatibility profile: {detail}")
-    marker.write_text(json.dumps(expected, indent=2), encoding="utf-8")
+    if not profile.latest:
+        marker.write_text(json.dumps(expected, indent=2), encoding="utf-8")
     return python
 
 
@@ -171,8 +176,14 @@ def validate_with_profile(
         quirk = Path(directory) / "generated_quirk.py"
         quirk.write_text(generate_quirk(project), encoding="utf-8")
         try:
+            runner = (
+                "import importlib.metadata as m, json, runpy, sys; "
+                "runpy.run_path(sys.argv[1]); "
+                "print(json.dumps({'python':sys.version.split()[0], "
+                "**{p: m.version(p) for p in ('zigpy','zha','zha-quirks')}}))"
+            )
             result = subprocess.run(
-                [str(python), "-I", str(quirk)],
+                [str(python), "-I", "-c", runner, str(quirk)],
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -183,16 +194,31 @@ def validate_with_profile(
                 ValidationIssue("error", f"Upstream import exceeded the {timeout} second timeout.")
             )
             return issues
+        except OSError as error:
+            issues.append(ValidationIssue("error", f"Could not run compatibility Python: {error}"))
+            return issues
 
     if result.returncode:
-        detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "unknown error"
+        detail = (
+            result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "unknown error"
+        )
         issues.append(ValidationIssue("error", f"Upstream import failed: {detail}"))
     else:
+        try:
+            versions = json.loads(result.stdout.strip().splitlines()[-1])
+            summary = (
+                f"Imported with zigpy {versions['zigpy']}, ZHA {versions['zha']}, "
+                f"zha-quirks {versions['zha-quirks']} on Python {versions['python']}."
+            )
+        except (IndexError, KeyError, TypeError, json.JSONDecodeError) as error:
+            issues.append(
+                ValidationIssue("error", f"Could not read compatibility versions: {error}")
+            )
+            return issues
         issues.append(
             ValidationIssue(
                 "success",
-                f"Imported with zigpy {profile.zigpy}, ZHA {profile.zha}, "
-                f"zha-quirks {profile.zha_quirks}.",
+                summary,
             )
         )
     return issues

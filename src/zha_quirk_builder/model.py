@@ -55,6 +55,55 @@ class AttributeSpec:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AttributeSpec:
+        if not isinstance(data, dict):
+            raise TypeError("Each attribute must be a JSON object.")
+        for name in (
+            "name",
+            "data_type",
+            "cluster_type",
+            "access",
+            "entity_kind",
+            "fallback_name",
+            "translation_key",
+            "device_class",
+            "unit",
+            "state_class",
+            "enum_class",
+        ):
+            if name in data and not isinstance(data[name], str):
+                raise ValueError(f"Attribute {name} must be a string.")
+        for name in (
+            "cluster_id",
+            "attribute_id",
+            "endpoint_id",
+            "manufacturer_code",
+            "divisor",
+            "multiplier",
+            "round_digits",
+            "reporting_min_interval",
+            "reporting_max_interval",
+            "reporting_change",
+        ):
+            if name not in data:
+                continue
+            value = data[name]
+            if value is None and name not in {"cluster_id", "attribute_id", "endpoint_id"}:
+                continue
+            if type(value) is not int:
+                raise ValueError(f"Attribute {name} must be an integer.")
+        for name in ("min_value", "max_value", "step"):
+            if name in data and data[name] is not None and type(data[name]) not in (int, float):
+                raise ValueError(f"Attribute {name} must be a number.")
+        for name in ("manufacturer_specific", "define_attribute", "replace_default_entity"):
+            if name in data and type(data[name]) is not bool:
+                raise ValueError(f"Attribute {name} must be a boolean.")
+        if "enum_values" in data:
+            values = data["enum_values"]
+            if not isinstance(values, dict) or any(
+                not isinstance(name, str) or type(value) is not int
+                for name, value in values.items()
+            ):
+                raise ValueError("Enum values must be a JSON object mapping names to integers.")
         return cls(**data)
 
 
@@ -71,6 +120,13 @@ class QuirkProject:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> QuirkProject:
+        if not isinstance(data, dict):
+            raise TypeError("Project must be a JSON object.")
+        for name in ("manufacturer", "model", "friendly_manufacturer", "friendly_model"):
+            if name in data and not isinstance(data[name], str):
+                raise ValueError(f"Project {name} must be a string.")
+        if not isinstance(data.get("attributes", []), list):
+            raise TypeError("Project attributes must be a JSON array.")
         payload = dict(data)
         payload["attributes"] = [
             AttributeSpec.from_dict(item) for item in payload.get("attributes", [])

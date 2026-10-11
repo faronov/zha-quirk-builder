@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zha-quirk-builder"
-version = "0.1.0"
+version = "0.1.1"
 description = "Standalone visual builder and compatibility validator for ZHA QuirkBuilder v2 files"
 requires-python = ">=3.12"
 dependencies = [

@@ -52,7 +52,12 @@ from zha_quirk_builder.profiles import (
     CompatibilityProfile,
     validate_with_profile,
 )
-from zha_quirk_builder.validator import installed_profile, validate_import, validate_project
+from zha_quirk_builder.validator import (
+    ValidationIssue,
+    installed_profile,
+    validate_import,
+    validate_project,
+)
 
 STYLE = """
 QWidget {
@@ -251,9 +256,7 @@ class AttributeDialog(QDialog):
         self.cluster_type = QComboBox()
         self.cluster_type.addItem("Input (server)", "server")
         self.cluster_type.addItem("Output (client)", "client")
-        self.cluster_type.setCurrentIndex(
-            max(0, self.cluster_type.findData(source.cluster_type))
-        )
+        self.cluster_type.setCurrentIndex(max(0, self.cluster_type.findData(source.cluster_type)))
         self.data_type = QComboBox()
         self.data_type.addItems(ZIGPY_TYPES)
         self.data_type.setCurrentText(source.data_type)
@@ -274,6 +277,7 @@ class AttributeDialog(QDialog):
         self.entity_kind.setCurrentText(source.entity_kind)
         self.fallback_name = QLineEdit(source.fallback_name)
         self.translation_key = QLineEdit(source.translation_key)
+        self.translation_key.setPlaceholderText("Automatic from attribute name when required")
         self.device_class = QLineEdit(source.device_class)
         self.unit = QLineEdit(source.unit)
         self.minimum = QLineEdit("" if source.min_value is None else str(source.min_value))
@@ -388,7 +392,9 @@ class AttributeDialog(QDialog):
             step=parse_optional_float(self.step.text()),
             divisor=parse_optional_int(self.divisor.text()),
             multiplier=parse_optional_int(self.multiplier.text()),
-            round_digits=parse_optional_int(self.round_digits.text()),
+            round_digits=parse_optional_int(self.round_digits.text())
+            if entity_kind == "sensor"
+            else None,
             state_class=self.state_class.currentText(),
             enum_class=self.enum_class.text().strip() if entity_kind == "enum" else "",
             enum_values=parse_enum_values(self.enum_values.text()) if entity_kind == "enum" else {},
@@ -646,10 +652,16 @@ class MainWindow(QMainWindow):
         project = self._current_project()
         issues = validate_project(project)
         if issues:
-            self.result.setText("\n".join(f"ERROR · {issue.message}" for issue in issues))
+            self.result.setText(
+                "\n".join(f"{issue.severity.upper()} · {issue.message}" for issue in issues)
+            )
         else:
             self.result.setText("STRUCTURE OK · Ready for upstream import validation.")
-        self.code.setPlainText(generate_quirk(project) if project.attributes else "")
+        self.code.setPlainText(
+            generate_quirk(project)
+            if project.attributes and not any(issue.severity == "error" for issue in issues)
+            else ""
+        )
         profile = installed_profile()
         self.profile.setItemText(
             0,
@@ -658,9 +670,14 @@ class MainWindow(QMainWindow):
         )
 
     def _validate(self) -> None:
+        self._validate_project(self._current_project())
+
+    def _validate_project(self, project: QuirkProject) -> list[ValidationIssue]:
         profile = self.profile.currentData()
         if not isinstance(profile, CompatibilityProfile):
-            return
+            issues = [ValidationIssue("error", "Select a compatibility profile first.")]
+            self.result.setText(f"ERROR · {issues[0].message}")
+            return issues
         progress = QProgressDialog(
             f"Preparing {profile.name} compatibility environment…",
             "",
@@ -675,7 +692,7 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            issues = validate_with_profile(self._current_project(), profile)
+            issues = validate_with_profile(project, profile)
         finally:
             QApplication.restoreOverrideCursor()
             progress.close()
@@ -683,6 +700,7 @@ class MainWindow(QMainWindow):
             "\n".join(f"{issue.severity.upper()} · {issue.message}" for issue in issues)
             or "VALID · No compatibility issues found."
         )
+        return issues
 
     def _profile_changed(self, index: int) -> None:
         if self.profile.itemData(index) is not None:
@@ -715,8 +733,8 @@ class MainWindow(QMainWindow):
 
     def _export_python(self) -> None:
         project = self._current_project()
-        issues = validate_project(project)
-        if issues:
+        issues = self._validate_project(project)
+        if any(issue.severity == "error" for issue in issues):
             QMessageBox.warning(
                 self,
                 "Cannot export",
@@ -736,7 +754,10 @@ class MainWindow(QMainWindow):
         except OSError as error:
             QMessageBox.critical(self, "Export failed", str(error))
             return
-        self.result.setText(f"EXPORTED · {path}")
+        warnings = "\n".join(
+            f"WARNING · {issue.message}" for issue in issues if issue.severity == "warning"
+        )
+        self.result.setText(f"EXPORTED · {path}" + (f"\n{warnings}" if warnings else ""))
 
     def _save_project(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -761,6 +782,10 @@ class MainWindow(QMainWindow):
         try:
             data = json.loads(Path(path).read_text(encoding="utf-8"))
             project = QuirkProject.from_dict(data)
+            issues = validate_project(project)
+            errors = [issue.message for issue in issues if issue.severity == "error"]
+            if errors:
+                raise ValueError("\n".join(errors))
         except (OSError, json.JSONDecodeError, TypeError, ValueError) as error:
             QMessageBox.critical(self, "Import failed", str(error))
             return

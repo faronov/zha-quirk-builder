@@ -3,17 +3,27 @@ from __future__ import annotations
 import ast
 import importlib.metadata
 import keyword
+import math
 import multiprocessing
 import sys
 import traceback
 from dataclasses import dataclass
 from multiprocessing.connection import Connection
 
+from zhaquirks.builder.metadata import (
+    BinarySensorDeviceClass,
+    NumberDeviceClass,
+    SensorDeviceClass,
+    SensorStateClass,
+)
+
 from zha_quirk_builder.generator import (
     entity_unique_id_suffix,
     enum_class_identifier,
     generate_quirk,
+    number_multiplier,
     python_identifier,
+    reserved_enum_names,
     standard_cluster_class,
 )
 from zha_quirk_builder.model import ENTITY_KINDS, ZIGPY_TYPES, QuirkProject
@@ -31,6 +41,12 @@ ENUM_DATA_TYPES = {
     "int32": (-0x80000000, 0x7FFFFFFF),
 }
 
+DEVICE_CLASSES = {
+    "sensor": SensorDeviceClass,
+    "number": NumberDeviceClass,
+    "binary_sensor": BinarySensorDeviceClass,
+}
+
 
 @dataclass(frozen=True, slots=True)
 class ValidationIssue:
@@ -40,6 +56,10 @@ class ValidationIssue:
 
 def validate_project(project: QuirkProject) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
+    try:
+        QuirkProject.from_dict(project.to_dict())
+    except (TypeError, ValueError) as error:
+        return [ValidationIssue("error", f"Invalid project data: {error}")]
     if not project.manufacturer.strip():
         issues.append(ValidationIssue("error", "Manufacturer is required."))
     if not project.model.strip():
@@ -50,6 +70,7 @@ def validate_project(project: QuirkProject) -> list[ValidationIssue]:
     seen: set[tuple[int, int, str, int]] = set()
     names: set[tuple[int, int, str, str]] = set()
     enum_classes: dict[str, tuple[str, dict[str, int]]] = {}
+    reserved_names = reserved_enum_names(project)
     entity_unique_ids: set[tuple[int, str]] = set()
     for index, attribute in enumerate(project.attributes, 1):
         prefix = f"Attribute {index}"
@@ -104,10 +125,37 @@ def validate_project(project: QuirkProject) -> list[ValidationIssue]:
                     f"{prefix}: custom attribute must be defined in a CustomCluster.",
                 )
             )
-        if not attribute.translation_key and not attribute.device_class:
+        elif not attribute.define_attribute and cluster_class is not None:
+            standard_attribute = cluster_class.attributes_by_name[attribute.name]
+            if attribute.attribute_id != standard_attribute.id:
+                issues.append(
+                    ValidationIssue(
+                        "error",
+                        f"{prefix}: {attribute.name} has standard attribute ID "
+                        f"0x{standard_attribute.id:04X}, not 0x{attribute.attribute_id:04X}.",
+                    )
+                )
+        device_classes = DEVICE_CLASSES.get(attribute.entity_kind)
+        if (
+            attribute.device_class
+            and device_classes is not None
+            and attribute.device_class not in {value.value for value in device_classes}
+        ):
             issues.append(
                 ValidationIssue(
-                    "error", f"{prefix}: translation_key or device_class is required by Quirk v2."
+                    "error",
+                    f"{prefix}: invalid {attribute.entity_kind} device_class "
+                    f"{attribute.device_class!r}.",
+                )
+            )
+        if (
+            attribute.entity_kind == "sensor"
+            and attribute.state_class
+            and attribute.state_class not in {value.value for value in SensorStateClass}
+        ):
+            issues.append(
+                ValidationIssue(
+                    "error", f"{prefix}: invalid sensor state_class {attribute.state_class!r}."
                 )
             )
         if not 1 <= attribute.endpoint_id <= 240:
@@ -118,6 +166,17 @@ def validate_project(project: QuirkProject) -> list[ValidationIssue]:
             issues.append(ValidationIssue("error", f"{prefix}: invalid attribute ID."))
         if attribute.access not in {"r", "w", "rw", "rp", "rwp"}:
             issues.append(ValidationIssue("error", f"{prefix}: unsupported access mode."))
+        if (
+            attribute.manufacturer_code is not None
+            and not 0 <= attribute.manufacturer_code <= 0xFFFF
+        ):
+            issues.append(ValidationIssue("error", f"{prefix}: invalid manufacturer code."))
+        if attribute.divisor == 0:
+            issues.append(ValidationIssue("error", f"{prefix}: divisor must not be zero."))
+        for name in ("min_value", "max_value", "step"):
+            value = getattr(attribute, name)
+            if isinstance(value, float) and not math.isfinite(value):
+                issues.append(ValidationIssue("error", f"{prefix}: {name} must be finite."))
         reporting = (
             attribute.reporting_min_interval,
             attribute.reporting_max_interval,
@@ -142,25 +201,63 @@ def validate_project(project: QuirkProject) -> list[ValidationIssue]:
             elif attribute.reporting_change < 0:
                 issues.append(ValidationIssue("error", f"{prefix}: reporting change is negative."))
         if attribute.entity_kind == "number":
+            effective_multiplier = None
+            if attribute.divisor != 0:
+                try:
+                    effective_multiplier = number_multiplier(attribute)
+                except OverflowError:
+                    issues.append(
+                        ValidationIssue(
+                            "error",
+                            f"{prefix}: Number scaling is outside the finite numeric range.",
+                        )
+                    )
+            if effective_multiplier == 0:
+                issues.append(
+                    ValidationIssue("error", f"{prefix}: Number multiplier must not be zero.")
+                )
+            if attribute.data_type not in ENUM_DATA_TYPES and attribute.data_type != "float":
+                issues.append(
+                    ValidationIssue("error", f"{prefix}: Number requires a numeric datatype.")
+                )
+            if attribute.step is not None and attribute.step <= 0:
+                issues.append(ValidationIssue("error", f"{prefix}: Number step must be positive."))
             if attribute.min_value is None or attribute.max_value is None:
                 issues.append(
                     ValidationIssue("error", f"{prefix}: Number requires minimum and maximum.")
                 )
             elif attribute.min_value >= attribute.max_value:
                 issues.append(ValidationIssue("error", f"{prefix}: minimum must be below maximum."))
+            if effective_multiplier is not None and (
+                attribute.data_type == "float" or effective_multiplier % 1 != 0
+            ):
+                issues.append(
+                    ValidationIssue(
+                        "warning",
+                        f"{prefix} ({attribute.name}): fractional Number writes may be "
+                        "truncated by ZHA (confirmed on ZHA 2.2.0 and 2.3.0). Import validation does not "
+                        "verify writes; check the selected ZHA version with the device.",
+                    )
+                )
         if attribute.round_digits is not None:
             if attribute.entity_kind != "sensor":
                 issues.append(
                     ValidationIssue("error", f"{prefix}: rounding is only supported for sensors.")
                 )
             elif not 0 <= attribute.round_digits <= 15:
-                issues.append(
-                    ValidationIssue("error", f"{prefix}: rounding digits must be 0..15.")
-                )
+                issues.append(ValidationIssue("error", f"{prefix}: rounding digits must be 0..15."))
         if attribute.entity_kind == "enum":
             enum_class = enum_class_identifier(attribute)
             if not enum_class.isidentifier() or keyword.iskeyword(enum_class):
                 issues.append(ValidationIssue("error", f"{prefix}: invalid enum class name."))
+            elif enum_class in reserved_names:
+                issues.append(
+                    ValidationIssue(
+                        "error",
+                        f"{prefix}: enum class {enum_class!r} conflicts with a generated "
+                        "class, import, or converter.",
+                    )
+                )
             if attribute.data_type not in ENUM_DATA_TYPES:
                 issues.append(
                     ValidationIssue("error", f"{prefix}: Enum requires an integer datatype.")
@@ -177,8 +274,7 @@ def validate_project(project: QuirkProject) -> list[ValidationIssue]:
                     issues.append(
                         ValidationIssue(
                             "error",
-                            f"{prefix}: enum value {name!r} must be "
-                            f"{minimum}..{maximum}.",
+                            f"{prefix}: enum value {name!r} must be {minimum}..{maximum}.",
                         )
                     )
             enum_definition = (attribute.data_type, attribute.enum_values)
@@ -190,7 +286,7 @@ def validate_project(project: QuirkProject) -> list[ValidationIssue]:
                     )
                 )
 
-    if not issues:
+    if not any(issue.severity == "error" for issue in issues):
         try:
             ast.parse(generate_quirk(project))
         except SyntaxError as error:
